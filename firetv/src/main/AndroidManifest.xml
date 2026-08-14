@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Reminders and scheduled recordings both fire at an exact wall-clock
+         time; setExactAndAllowWhileIdle silently degrades to an inexact alarm
+         (checked at schedule time via canScheduleExactAlarms) rather than
+         crashing if this is ever revoked on API 33+, but declaring it is what
+         lets it be granted at all. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Alarms do not survive a reboot; BootReceiver re-registers every
+         still-future reminder and recording on startup. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- API 33+ requires this to show the "reminder is starting" and
+         "recording in progress" notifications at all. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Required to run a foreground service at all (API 28+), and to run one
+         of type dataSync specifically (API 34+) - RecordingService is a
+         long-lived network download, not audio/video actively rendering, so
+         dataSync is the correct category rather than mediaPlayback. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Fire TV has no touchscreen. Without this the Amazon Appstore filters
+         the app out of TV devices entirely. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <application
+        android:name=".TapperApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:banner="@drawable/banner"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Tapper"
+        android:usesCleartextTraffic="true"
+        android:largeHeap="true">
+        <!-- cleartext: 2,470 of 13,505 stream URLs in the default playlist are
+             plain http:// and fail silently without this -->
+        <!-- largeHeap: a big Xtream/M3U account (tens of thousands of
+             channels, movies and shows all indexed into country/category
+             rails at once) sits close to the default ~192MB heap ceiling on
+             a Fire TV Stick's limited RAM even after trimming the repeated
+             index rebuilds in PlaylistRepository - this raises the ceiling
+             the OS grants the process instead, real headroom rather than a
+             fix for a specific leak. Costs nothing for accounts that never
+             get near it. -->
+
+        <activity
+            android:name=".MainActivity"
+            android:banner="@drawable/banner"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.Tapper">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <!-- LEANBACK_LAUNCHER is what puts the app on the Fire TV home
+                     row. Plain LAUNCHER installs but never appears. -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".reminders.ReminderAlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".recordings.RecordingAlarmReceiver"
+            android:exported="false" />
+
+        <!-- Not exported: only this app's own alarms should ever be able to
+             re-arm scheduled work, never another app forging the boot broadcast
+             extras. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".recordings.RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+</manifest>

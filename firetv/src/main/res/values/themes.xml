@@ -1,0 +1,10 @@
+<resources>
+    <!-- The OS splash. windowBackground is compiled in and cannot be changed at
+         runtime by any app; the user-configurable image is the in-app screen
+         that follows this one. -->
+    <style name="Theme.Tapper" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:statusBarColor">#0B0E14</item>
+        <item name="android:navigationBarColor">#0B0E14</item>
+    </style>
+</resources>
