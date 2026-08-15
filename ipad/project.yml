@@ -45,11 +45,15 @@ targets:
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-UISupportedInterfaceOrientations:
-  - UIInterfaceOrientationPortrait
-  - UIInterfaceOrientationPortraitUpsideDown
-  - UIInterfaceOrientationLandscapeLeft
-  - UIInterfaceOrientationLandscapeRight
+        # App Store Connect rejects an iPad upload unless all four
+        # orientations are listed — this is required for iPad
+        # multitasking (Split View / Slide Over), regardless of which
+        # orientations the app actually wants to support in its own UI.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     # Code signing is deliberately NOT configured here. CI passes
     # CODE_SIGN_STYLE/DEVELOPMENT_TEAM/PROVISIONING_PROFILE_SPECIFIER as
     # xcodebuild command-line overrides at archive time instead (see the
