@@ -22,7 +22,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     # iPad only (device family 2) — this is the iPad app, not a universal
     # iPhone/iPad build. Revisit if that ever changes.
     TARGETED_DEVICE_FAMILY: "2"
@@ -45,10 +45,11 @@ targets:
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-          - UIInterfaceOrientationPortrait
+UISupportedInterfaceOrientations:
+  - UIInterfaceOrientationPortrait
+  - UIInterfaceOrientationPortraitUpsideDown
+  - UIInterfaceOrientationLandscapeLeft
+  - UIInterfaceOrientationLandscapeRight
     # Code signing is deliberately NOT configured here. CI passes
     # CODE_SIGN_STYLE/DEVELOPMENT_TEAM/PROVISIONING_PROFILE_SPECIFIER as
     # xcodebuild command-line overrides at archive time instead (see the
