@@ -1,0 +1,158 @@
+name: Build iPad TestFlight
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push cancels the previous run rather than queueing another build,
+# same reasoning as the Fire TV workflow.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testflight:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # shared/ still applies the Android Gradle Plugin (for the Fire TV
+      # target) alongside kotlin-multiplatform, so Gradle needs an Android
+      # SDK just to *configure* the project, even though this workflow never
+      # builds an Android task. macOS runner images generally ship one
+      # already, but pinning it explicitly — mirroring the Fire TV
+      # workflow's own setup-android step — avoids depending on that being
+      # true of whatever image happens to be current.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      # Produces shared/build/XCFrameworks/release/TapperCore.xcframework,
+      # which ipad/project.yml points the Xcode project at.
+      - name: Build shared/ as an XCFramework
+        run: gradle :shared:assembleTapperCoreReleaseXCFramework --no-daemon --stacktrace
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # Regenerates ipad/TapperIPad.xcodeproj from ipad/project.yml. See the
+      # comment at the top of that file for why the .xcodeproj itself isn't
+      # committed to the repo.
+      - name: Generate Xcode project
+        run: cd ipad && xcodegen generate
+
+      # Imports the distribution certificate + provisioning profile you
+      # created in Phase 0 into a throwaway keychain scoped to this run only.
+      # Required secrets (repo Settings → Secrets and variables → Actions):
+      #   APPLE_CERTIFICATE_P12_BASE64   — `base64 -i YourCert.p12 | pbcopy`
+      #   APPLE_CERTIFICATE_PASSWORD     — the password you set exporting the .p12
+      #   APPLE_PROVISIONING_PROFILE_BASE64 — `base64 -i YourProfile.mobileprovision | pbcopy`
+      - name: Import signing certificate and provisioning profile
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/tapper-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+
+          echo -n "$CERTIFICATE_BASE64" | base64 -D -o "$CERT_PATH"
+          echo -n "$PROFILE_BASE64" | base64 -D -o "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+
+          mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
+          cp "$PROFILE_PATH" ~/Library/MobileDevice/"Provisioning Profiles"/
+
+          # Read the profile's own UUID back out rather than hardcoding
+          # whatever you happened to name it in the Developer portal, so the
+          # archive step below can reference it exactly.
+          PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID xml1 -o - - | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p')
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+
+      - name: Archive
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          xcodebuild -project ipad/TapperIPad.xcodeproj \
+            -scheme TapperIPad \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/TapperIPad.xcarchive" \
+            -destination "generic/platform=iOS" \
+            -allowProvisioningUpdates \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
+            archive
+
+      # Uploads straight to App Store Connect (internal TestFlight testing —
+      # no App Review needed for that, only for external testers). Required
+      # secrets:
+      #   APPLE_TEAM_ID                  — developer.apple.com/account → Membership
+      #   APP_STORE_CONNECT_KEY_ID       — App Store Connect → Users and Access → Keys
+      #   APP_STORE_CONNECT_ISSUER_ID    — same page, shown above the key list
+      #   APP_STORE_CONNECT_API_KEY_BASE64 — `base64 -i AuthKey_XXXX.p8 | pbcopy`
+      #     (download the .p8 when you first generate the key — Apple only
+      #     lets you download it once)
+      - name: Export and upload to TestFlight
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/private_keys
+          echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 -D -o ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8
+
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>$APPLE_TEAM_ID</string>
+            <key>destination</key>
+            <string>upload</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>io.tapper.ipad</key>
+              <string>$PROFILE_UUID</string>
+            </dict>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/TapperIPad.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8 \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
