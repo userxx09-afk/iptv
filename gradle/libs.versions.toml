@@ -29,6 +29,9 @@ media3-dash         = { group = "androidx.media3", name = "media3-exoplayer-dash
 media3-ui           = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 coil-compose        = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 coroutines-android  = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+# Multiplatform coroutines artifact for shared's commonMain — coroutines-android
+# above stays JVM/Android-only and keeps powering the Fire TV-specific bits.
+coroutines-core     = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 security-crypto     = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 work-runtime        = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 documentfile        = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentFile" }
@@ -38,3 +41,4 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 android-library     = { id = "com.android.library", version.ref = "agp" }
 kotlin-android      = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose      = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
