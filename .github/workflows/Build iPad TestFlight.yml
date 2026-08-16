@@ -13,7 +13,20 @@ concurrency:
 
 jobs:
   testflight:
-    runs-on: macos-latest
+    # Pinned, not macos-latest. GitHub moved the macos-latest label onto the
+    # macos-26 image in June 2026, which currently defaults to Xcode 26.6 -
+    # the "Build shared/ as an XCFramework" step below then silently produced
+    # nothing (NO-SOURCE on every Kotlin/Native compile task, 10s total
+    # instead of the ~3.5min a real build takes) rather than a hard failure,
+    # because the Kotlin Gradle Plugin here (2.0.20) only claims tested
+    # support up to Xcode 15.3 - an 11-major-version gap. macos-26's image
+    # only has Xcode 26.x builds installed, so there's no older Xcode to pin
+    # to on that image; macos-15 (Xcode 16.4 default) is a much smaller,
+    # better-precedented gap. If GitHub deprecates macos-15 before this gets
+    # revisited with a Kotlin upgrade, that deprecation notice is the signal
+    # to bump the Kotlin Gradle Plugin version instead of just chasing the
+    # next runner label.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
