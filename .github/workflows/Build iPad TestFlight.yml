@@ -13,20 +13,19 @@ concurrency:
 
 jobs:
   testflight:
-    # Pinned, not macos-latest. GitHub moved the macos-latest label onto the
-    # macos-26 image in June 2026, which currently defaults to Xcode 26.6 -
-    # the "Build shared/ as an XCFramework" step below then silently produced
-    # nothing (NO-SOURCE on every Kotlin/Native compile task, 10s total
-    # instead of the ~3.5min a real build takes) rather than a hard failure,
-    # because the Kotlin Gradle Plugin here (2.0.20) only claims tested
-    # support up to Xcode 15.3 - an 11-major-version gap. macos-26's image
-    # only has Xcode 26.x builds installed, so there's no older Xcode to pin
-    # to on that image; macos-15 (Xcode 16.4 default) is a much smaller,
-    # better-precedented gap. If GitHub deprecates macos-15 before this gets
-    # revisited with a Kotlin upgrade, that deprecation notice is the signal
-    # to bump the Kotlin Gradle Plugin version instead of just chasing the
-    # next runner label.
-    runs-on: macos-15
+    # macos-latest, deliberately not pinned. This currently resolves to the
+    # macos-26 image (Xcode 26.6 default). It was pinned to macos-15 for one
+    # round while chasing a NO-SOURCE build mystery, on the theory that the
+    # Kotlin Gradle Plugin here (2.0.20, tested only up to Xcode 15.3) choked
+    # on the newer Xcode. That theory was wrong — the real cause was that
+    # shared/src/commonMain and shared/src/iosMain simply weren't committed
+    # to the repo yet, unrelated to Xcode version at all. Once that was fixed,
+    # Apple's own upload validation then required the iOS 26 SDK (Xcode 26+)
+    # for any new App Store Connect submission, which only macos-26 has — so
+    # tracking macos-latest is now a hard requirement, not just a convenience.
+    # The Kotlin Gradle Plugin's Xcode-compatibility check is a non-fatal
+    # warning (confirmed: the build completes successfully despite it).
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -51,31 +50,10 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      # TEMPORARY — diagnosing the NO-SOURCE mystery below. Confirms the
-      # checkout itself has every expected .kt file (rules out a bad
-      # checkout being different from what `git ls-tree` shows locally),
-      # remove once the real cause is found.
-      - name: Diagnose shared/src checkout
-        run: |
-          echo "--- shared/src, every .kt file this runner actually checked out ---"
-          find shared/src -type f -name "*.kt" | sort
-          echo "--- settings.gradle.kts ---"
-          cat settings.gradle.kts
-
       # Produces shared/build/XCFrameworks/release/TapperCore.xcframework,
       # which ipad/project.yml points the Xcode project at.
-      #
-      # TEMPORARY: --info + grep below, in place of the plain command, while
-      # tracking down why every Kotlin/Native compile task reports NO-SOURCE
-      # despite shared/src/commonMain and shared/src/iosMain both having real
-      # files (confirmed via the diagnostic step above and independently via
-      # `git ls-tree` locally). Revert to the plain command once the cause is
-      # found — --info produces far too much output to leave on permanently.
       - name: Build shared/ as an XCFramework
-        run: |
-          set -o pipefail
-          gradle :shared:assembleTapperCoreReleaseXCFramework --no-daemon --stacktrace --info 2>&1 | \
-            grep -iE "no source|nosource|source set|sourceset|iosMain|iosArm64Main|iosSimulatorArm64Main|commonMain|compileKotlinIosArm64|Executing task|Skipping task|up-to-date|BUILD SUCCESSFUL|BUILD FAILED"
+        run: gradle :shared:assembleTapperCoreReleaseXCFramework --no-daemon --stacktrace
 
       - name: Install XcodeGen
         run: brew install xcodegen
