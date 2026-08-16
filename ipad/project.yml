@@ -21,8 +21,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "4"
     # iPad only (device family 2) — this is the iPad app, not a universal
     # iPhone/iPad build. Revisit if that ever changes.
     TARGETED_DEVICE_FAMILY: "2"
