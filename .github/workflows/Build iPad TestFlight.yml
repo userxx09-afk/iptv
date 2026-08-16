@@ -51,10 +51,31 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      # TEMPORARY — diagnosing the NO-SOURCE mystery below. Confirms the
+      # checkout itself has every expected .kt file (rules out a bad
+      # checkout being different from what `git ls-tree` shows locally),
+      # remove once the real cause is found.
+      - name: Diagnose shared/src checkout
+        run: |
+          echo "--- shared/src, every .kt file this runner actually checked out ---"
+          find shared/src -type f -name "*.kt" | sort
+          echo "--- settings.gradle.kts ---"
+          cat settings.gradle.kts
+
       # Produces shared/build/XCFrameworks/release/TapperCore.xcframework,
       # which ipad/project.yml points the Xcode project at.
+      #
+      # TEMPORARY: --info + grep below, in place of the plain command, while
+      # tracking down why every Kotlin/Native compile task reports NO-SOURCE
+      # despite shared/src/commonMain and shared/src/iosMain both having real
+      # files (confirmed via the diagnostic step above and independently via
+      # `git ls-tree` locally). Revert to the plain command once the cause is
+      # found — --info produces far too much output to leave on permanently.
       - name: Build shared/ as an XCFramework
-        run: gradle :shared:assembleTapperCoreReleaseXCFramework --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle :shared:assembleTapperCoreReleaseXCFramework --no-daemon --stacktrace --info 2>&1 | \
+            grep -iE "no source|nosource|source set|sourceset|iosMain|iosArm64Main|iosSimulatorArm64Main|commonMain|compileKotlinIosArm64|Executing task|Skipping task|up-to-date|BUILD SUCCESSFUL|BUILD FAILED"
 
       - name: Install XcodeGen
         run: brew install xcodegen
