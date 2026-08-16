@@ -11,6 +11,11 @@ coroutines = "1.8.1"
 securityCrypto = "1.1.0-alpha06"
 workManager = "2.9.1"
 documentFile = "1.0.1"
+# Networking/JSON for shared's commonMain (XtreamClient/TmdbClient) — see the
+# comment in shared/build.gradle.kts for why plain HttpURLConnection/org.json
+# (Android-only) couldn't just travel to commonMain as-is.
+ktor = "3.0.3"
+kotlinxSerialization = "1.7.3"
 
 [libraries]
 core-ktx            = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -35,6 +40,13 @@ coroutines-core     = { group = "org.jetbrains.kotlinx", name = "kotlinx-corouti
 security-crypto     = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 work-runtime        = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 documentfile        = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentFile" }
+# ktor-client-core is the commonMain API; okhttp/darwin are the per-platform
+# engines that actually open sockets (OkHttp already ships transitively via
+# Media3 on Fire TV; Darwin wraps NSURLSession on iOS — see net/HttpEngine.kt).
+ktor-client-core     = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
+ktor-client-okhttp   = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-darwin   = { group = "io.ktor", name = "ktor-client-darwin", version.ref = "ktor" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -42,3 +54,6 @@ android-library     = { id = "com.android.library", version.ref = "agp" }
 kotlin-android      = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose      = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+# Version-matched to the Kotlin compiler itself (part of the same JetBrains
+# release train), not its own independent version number.
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

@@ -8,6 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import io.tapper.core.model.Channel
 import io.tapper.core.model.ContentKind
 import io.tapper.core.tmdb.TmdbClient
+import kotlinx.coroutines.CancellationException
 
 /**
  * Movie/Show metadata (poster, synopsis, rating) looked up from TMDb by
@@ -81,7 +82,7 @@ class MovieMetadataStore(
      * temporary outage or a bad key look permanent until the cache is
      * cleared, rather than simply trying again next time.
      */
-    fun lookup(channel: Channel): Metadata? {
+    suspend fun lookup(channel: Channel): Metadata? {
         if (channel.kind == ContentKind.LIVE) return null
         // Reset up front, not just on a successful network call below - a
         // cache hit (or a blank key/title) returns early without ever
@@ -103,6 +104,14 @@ class MovieMetadataStore(
 
         val result = try {
             TmdbClient(key).search(cleanTitle, year, isShow = channel.kind == ContentKind.SERIES)
+        } catch (c: CancellationException) {
+            // search() is now a suspend call (Phase 2's Ktor migration) -
+            // must propagate, not fall into the generic catch below, or
+            // scrolling away from a title while its lookup is in flight
+            // would get swallowed as a normal failure instead of actually
+            // cancelling, the same hazard TmdbClient.fetch() itself guards
+            // against internally.
+            throw c
         } catch (t: Throwable) {
             // Deliberately not cached as a miss (see the class doc comment
             // above lookup()) - a bad key or a dropped connection should be

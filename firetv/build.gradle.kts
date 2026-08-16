@@ -35,8 +35,8 @@ android {
         // files rather than the variable Archivo TTF: FontVariation needs 26.
         minSdk = 25
         targetSdk = 34
-        versionCode = 31
-        versionName = "0.14.3"
+        versionCode = 32
+        versionName = "0.14.4"
     }
     buildTypes {
         release {
@@ -80,7 +80,7 @@ dependencies {
     // Periodic background guide refresh: runs on its own schedule independent
     // of whether the app is open, with retry/backoff and network/battery
     // constraints handled by the platform instead of a coroutine tied to an
-    // Activity's lifecycle.
+    // Activity's lifecycleget status.
     implementation(libs.work.runtime)
     // Reads a user-picked SAF folder's contents (custom logo folder override).
     implementation(libs.documentfile)
