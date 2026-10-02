@@ -1,8 +1,6 @@
 package io.tapper.core.xtream
 
 import io.tapper.core.model.Channel
-import io.tapper.core.xtream.multiplatform.XtreamAccount
-import io.tapper.core.xtream.multiplatform.XtreamClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -59,7 +57,22 @@ object XtreamBridge {
             val client = XtreamClient(host, username, password)
             try {
                 val account = client.authenticate()
-                val live = runCatching { client.liveChannels(sourceId, onWarning = onWarning) }
+                // preferHls = true, iOS-only: XtreamClient's default is a raw
+                // .ts URL (liveUrl(id, ext = "ts")), which is what Fire TV's
+                // ExoPlayer wants and already ships fine with. AVPlayer is a
+                // different story - AVFoundation has no real support for a
+                // raw progressive-download MPEG-TS stream at all, only for
+                // HLS (.m3u8) or a handful of file containers (mp4/mov).
+                // Requesting a bare .ts live URL on iOS plays nothing and
+                // fails with AVFoundationErrorDomain -11850, "The server is
+                // not correctly configured" - a confusing message for what
+                // is actually just an unsupported container, not a real
+                // server problem. Every mainstream Xtream Codes panel serves
+                // the exact same live feed at the .m3u8 extension too (it's
+                // part of the standard Xtream API, not provider-specific),
+                // so this only changes which extension iOS asks for - same
+                // endpoint, same feed, a container AVPlayer actually plays.
+                val live = runCatching { client.liveChannels(sourceId, preferHls = true, onWarning = onWarning) }
                     .onFailure { onWarning("Couldn't load live channels: ${it.message}") }
                     .getOrDefault(emptyList())
                 val movies = runCatching { client.movies(sourceId, onWarning = onWarning) }
