@@ -21,8 +21,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.3.0"
-    CURRENT_PROJECT_VERSION: "7"
+    MARKETING_VERSION: "0.4.0"
+    CURRENT_PROJECT_VERSION: "8"
     # iPad only (device family 2) — this is the iPad app, not a universal
     # iPhone/iPad build. Revisit if that ever changes.
     TARGETED_DEVICE_FAMILY: "2"
@@ -64,6 +64,22 @@ targets:
         # declaring that upfront here means every future build clears
         # automatically and reaches testers without a manual step.
         ITSAppUsesNonExemptEncryption: false
+        # This app connects to arbitrary, user-supplied IPTV sources - M3U
+        # playlist URLs and Xtream Codes panel hosts - many of which are
+        # plain http://, not https://, which is the norm in this ecosystem
+        # (the same reason the Fire TV/Android manifest needs
+        # android:usesCleartextTraffic="true"). Without an ATS exception,
+        # iOS silently refuses every plain-http request before it ever
+        # leaves the device - NSURLErrorDomain Code=-1022, "App Transport
+        # Security policy requires...the use of a secure connection" - which
+        # is exactly what happened testing the Xtream Codes login against a
+        # real http:// panel (http://line.prime4tv.com). Since the host is
+        # arbitrary user input decided at runtime, not a fixed domain this
+        # app controls, a per-domain NSExceptionDomains allowlist isn't
+        # workable here - NSAllowsArbitraryLoads is the correct, deliberate
+        # choice for this app's use case, not a shortcut.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     # Code signing is deliberately NOT configured here. CI passes
     # CODE_SIGN_STYLE/DEVELOPMENT_TEAM/PROVISIONING_PROFILE_SPECIFIER as
     # xcodebuild command-line overrides at archive time instead (see the
