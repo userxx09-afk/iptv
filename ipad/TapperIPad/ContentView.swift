@@ -9,6 +9,13 @@ import TapperCore
 /// tapping a series has to lead somewhere (its episode list) for the
 /// screen to mean anything at all, so that single row type is a
 /// NavigationLink - see EpisodeListView's own doc comment.
+///
+/// "Sources" (toolbar) is the persisted counterpart to the form above -
+/// mirrors Fire TV's AddSourceScreen + SourceStore: saved sources survive
+/// relaunch, Xtream credentials live in the Keychain (CredentialVault), and
+/// switching sources re-authenticates/reloads instead of retyping
+/// everything. The quick-connect form stays as-is alongside it as an
+/// unsaved, one-off path - nothing about it changes here.
 struct ContentView: View {
     @StateObject private var playlistLoader = PlaylistLoader()
     @StateObject private var xtreamLoader = XtreamLoader()
@@ -19,10 +26,31 @@ struct ContentView: View {
     @State private var xtreamUsername: String = ""
     @State private var xtreamPassword: String = ""
 
+    @State private var sources: [TvSource] = SourceStore.shared.all()
+    @State private var activeSheet: ActiveSheet?
+    @State private var addSourceBusy = false
+    @State private var addSourceError: String?
+    @State private var pendingSourceSave: PendingSourceSave?
+
     private enum SourceMode: String, CaseIterable, Identifiable {
         case playlist = "Playlist URL"
         case xtream = "Xtream Login"
         var id: String { rawValue }
+    }
+
+    private enum ActiveSheet: Identifiable {
+        case sources
+        case addSource
+        var id: Int { hashValue }
+    }
+
+    /// What's waiting on the in-flight load started from AddSourceView, so
+    /// the onChange handlers below know what to persist once it finishes -
+    /// and can tell that load apart from one started by the quick-connect
+    /// form, which never sets this.
+    private enum PendingSourceSave {
+        case xtream(name: String, host: String, user: String, pass: String)
+        case m3u(name: String, url: String, epg: String?)
     }
 
     private var hasContent: Bool {
@@ -46,11 +74,104 @@ struct ContentView: View {
                     : "Tapper IPTV"
             )
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Sources") { activeSheet = .sources }
+                }
                 if hasContent {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("New Source") { resetAll() }
                     }
                 }
+            }
+        }
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .sources:
+                SourceListView(
+                    sources: sources,
+                    activeId: SourceStore.shared.activeId,
+                    onSelect: { selectSource($0) },
+                    onRemove: { removeSource($0) },
+                    onAddTapped: {
+                        addSourceError = nil
+                        activeSheet = .addSource
+                    },
+                    onDismiss: { activeSheet = nil }
+                )
+            case .addSource:
+                AddSourceView(
+                    busy: addSourceBusy,
+                    error: addSourceError,
+                    onSubmitXtream: { name, host, user, pass in
+                        addSourceError = nil
+                        addSourceBusy = true
+                        pendingSourceSave = .xtream(name: name, host: host, user: user, pass: pass)
+                        xtreamLoader.login(host: host, username: user, password: pass)
+                    },
+                    onSubmitM3u: { name, url, epg in
+                        addSourceError = nil
+                        addSourceBusy = true
+                        pendingSourceSave = .m3u(name: name, url: url, epg: epg)
+                        playlistLoader.load(urlString: url)
+                    },
+                    onCancel: {
+                        pendingSourceSave = nil
+                        addSourceBusy = false
+                        addSourceError = nil
+                        activeSheet = nil
+                    }
+                )
+            }
+        }
+        // Reuses XtreamLoader's existing authenticate+load flow rather than
+        // adding a separate auth-only entry point on the bridge - it already
+        // validates the login and leaves the app ready to browse on success,
+        // so a second code path just for AddSourceView isn't worth the extra
+        // surface. Guarded on pendingSourceSave so the quick-connect form's
+        // own login (which never sets it) is untouched by this.
+        .onChange(of: xtreamLoader.isLoading) { _, isLoading in
+            guard !isLoading, case .xtream(let name, let host, let user, let pass)? = pendingSourceSave else { return }
+            if xtreamLoader.isLoggedIn {
+                let id = "xtream-" + String(UUID().uuidString.prefix(8))
+                CredentialVault.put(sourceId: id, username: user, password: pass)
+                SourceStore.shared.add(
+                    TvSource(id: id, name: name.isEmpty ? host : name, kind: .xtream, location: host, epgUrlOverride: nil, builtIn: false)
+                )
+                SourceStore.shared.activeId = id
+                sources = SourceStore.shared.all()
+                mode = .xtream
+                xtreamHost = host
+                xtreamUsername = user
+                xtreamPassword = pass
+                pendingSourceSave = nil
+                addSourceBusy = false
+                addSourceError = nil
+                activeSheet = nil
+            } else {
+                addSourceBusy = false
+                addSourceError = xtreamLoader.errorMessage ?? "Couldn't connect."
+                pendingSourceSave = nil
+            }
+        }
+        .onChange(of: playlistLoader.isLoading) { _, isLoading in
+            guard !isLoading, case .m3u(let name, let url, let epg)? = pendingSourceSave else { return }
+            if !playlistLoader.channels.isEmpty {
+                let id = "m3u-" + String(UUID().uuidString.prefix(8))
+                SourceStore.shared.add(
+                    TvSource(id: id, name: name.isEmpty ? "Playlist" : name, kind: .m3u, location: url, epgUrlOverride: epg, builtIn: false)
+                )
+                SourceStore.shared.activeId = id
+                sources = SourceStore.shared.all()
+                mode = .playlist
+                urlText = url
+                pendingSourceSave = nil
+                addSourceBusy = false
+                addSourceError = nil
+                activeSheet = nil
+            } else {
+                addSourceBusy = false
+                addSourceError = playlistLoader.errorMessage ?? "Couldn't load this playlist."
+                pendingSourceSave = nil
             }
         }
     }
@@ -62,6 +183,38 @@ struct ContentView: View {
         xtreamHost = ""
         xtreamUsername = ""
         xtreamPassword = ""
+    }
+
+    /// Switches the active saved source and loads it - M3U just needs its
+    /// stored URL, Xtream needs its Keychain-held credentials alongside the
+    /// stored host. A source added before credentials could be looked up
+    /// (shouldn't happen via AddSourceView, but guards against a source
+    /// surviving a Keychain wipe/reinstall) silently does nothing rather
+    /// than crash.
+    private func selectSource(_ source: TvSource) {
+        SourceStore.shared.activeId = source.id
+        activeSheet = nil
+        playlistLoader.reset()
+        xtreamLoader.reset()
+        switch source.kind {
+        case .m3u:
+            mode = .playlist
+            urlText = source.location
+            playlistLoader.load(urlString: source.location)
+        case .xtream:
+            guard let creds = CredentialVault.get(sourceId: source.id) else { return }
+            mode = .xtream
+            xtreamHost = source.location
+            xtreamUsername = creds.username
+            xtreamPassword = creds.password
+            xtreamLoader.login(host: source.location, username: creds.username, password: creds.password)
+        }
+    }
+
+    private func removeSource(_ source: TvSource) {
+        SourceStore.shared.remove(id: source.id)
+        CredentialVault.delete(sourceId: source.id)
+        sources = SourceStore.shared.all()
     }
 
     private var loadForm: some View {
