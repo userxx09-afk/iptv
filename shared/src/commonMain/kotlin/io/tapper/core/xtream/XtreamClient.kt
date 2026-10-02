@@ -13,6 +13,7 @@ import io.tapper.core.model.ContentKind
 import io.tapper.core.model.StreamRef
 import io.tapper.core.net.tapperHttpClient
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -337,30 +338,54 @@ class XtreamClient(
             throw XtreamException("Unexpected response from the server.", t)
         }
 
+    // Up to 3 attempts: the real request plus 2 short-delayed retries,
+    // bounded so a genuinely dead panel still fails in under ~1.5s of extra
+    // wait rather than hanging.
+    //
+    // Why this exists at all: OkHttp (Android/Fire TV's engine) retries a
+    // GET by default when it picks a pooled keep-alive connection that the
+    // server already closed - the caller never sees it. Ktor's Darwin engine
+    // (iOS, via NSURLSession) has no such built-in retry; the exact same
+    // situation surfaces straight to this code as
+    // NSURLErrorNetworkConnectionLost (-1005), "The network connection was
+    // lost." Apple's own guidance on this error (Technical Q&A QA1941) is
+    // that it's expected to happen periodically against real servers and
+    // that idempotent requests - a plain GET, like every call this client
+    // makes - should simply be retried rather than treated as a hard
+    // failure. This closes that iOS-specific gap without needing anything
+    // Darwin-specific here in commonMain: any transport-level failure gets
+    // the same short retry, on both platforms, since it's cheap and safe
+    // either way.
     private suspend fun fetch(url: String): String {
-        val response: HttpResponse = try {
-            http.get(url) { header("User-Agent", "TapperIPTV/0.5") }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw XtreamException("Couldn't reach the server: ${t.message}", t)
+        var lastError: Throwable? = null
+        repeat(3) { attempt ->
+            val response: HttpResponse = try {
+                http.get(url) { header("User-Agent", "TapperIPTV/0.5") }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                lastError = t
+                if (attempt < 2) delay(400L * (attempt + 1))
+                return@repeat
+            }
+            if (!response.status.isSuccess()) {
+                throw XtreamException(
+                    when (response.status.value) {
+                        401, 403 -> "Server refused the request (HTTP ${response.status.value}). Check the username and password."
+                        404 -> "Server has no Xtream API at this address (HTTP 404). Check the port and path."
+                        else -> "Server returned HTTP ${response.status.value}."
+                    }
+                )
+            }
+            return try {
+                response.bodyAsText()
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                throw XtreamException("Couldn't read the server's response: ${t.message}", t)
+            }
         }
-        if (!response.status.isSuccess()) {
-            throw XtreamException(
-                when (response.status.value) {
-                    401, 403 -> "Server refused the request (HTTP ${response.status.value}). Check the username and password."
-                    404 -> "Server has no Xtream API at this address (HTTP 404). Check the port and path."
-                    else -> "Server returned HTTP ${response.status.value}."
-                }
-            )
-        }
-        return try {
-            response.bodyAsText()
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw XtreamException("Couldn't read the server's response: ${t.message}", t)
-        }
+        throw XtreamException("Couldn't reach the server: ${lastError?.message}", lastError)
     }
 }
 
