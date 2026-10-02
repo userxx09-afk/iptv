@@ -1,6 +1,8 @@
 package io.tapper.core.xtream
 
 import io.tapper.core.model.Channel
+import io.tapper.core.xtream.multiplatform.XtreamAccount
+import io.tapper.core.xtream.multiplatform.XtreamClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
