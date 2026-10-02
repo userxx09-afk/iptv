@@ -56,7 +56,7 @@ final class TapperPlayer: ObservableObject {
         isBuffering = true
 
         guard let url = URL(string: stream.url) else {
-            explain(httpStatus: nil, socketError: true)
+            explain(httpStatus: nil, socketError: true, rawError: nil)
             return
         }
 
@@ -126,7 +126,7 @@ final class TapperPlayer: ObservableObject {
             return
         }
         let (httpStatus, socketError) = classify(error: error)
-        explain(httpStatus: httpStatus, socketError: socketError)
+        explain(httpStatus: httpStatus, socketError: socketError, rawError: error)
     }
 
     // AVErrorHTTPStatusCodeKey, like AVURLAssetHTTPHeaderFieldsKey above,
@@ -149,10 +149,16 @@ final class TapperPlayer: ObservableObject {
         return (nil, socketCodes.contains(error.code))
     }
 
-    private func explain(httpStatus: Int?, socketError: Bool) {
+    // rawError is purely diagnostic: appended to the user-facing message
+    // (not used by Diagnose.from itself, which only sees the classified
+    // httpStatus/socketError) so that if a failure doesn't fit any of the
+    // existing diagnosis tiers, the exact NSError domain/code comes back in
+    // the next bug report instead of another guess-and-rebuild cycle. Cheap
+    // to pull out once the real failure mode here is confirmed and handled.
+    private func explain(httpStatus: Int?, socketError: Bool, rawError: NSError?) {
         isBuffering = false
         let elapsedMs = Int64(Date().timeIntervalSince(startedAt) * 1000)
-        diagnosisMessage = PlaybackDiagnosisBridge.shared.diagnose(
+        let message = PlaybackDiagnosisBridge.shared.diagnose(
             httpStatus: Int32(httpStatus ?? 0),
             hasHttpStatus: httpStatus != nil,
             socketError: socketError,
@@ -160,6 +166,11 @@ final class TapperPlayer: ObservableObject {
             renderedFrames: renderedFrames,
             networkReachable: true
         )
+        if let rawError {
+            diagnosisMessage = "\(message)\n\n(\(rawError.domain) \(rawError.code))"
+        } else {
+            diagnosisMessage = message
+        }
     }
 
     private func tearDownObservers() {
