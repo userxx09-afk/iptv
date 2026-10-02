@@ -64,6 +64,37 @@ jobs:
       - name: Generate Xcode project
         run: cd ipad && xcodegen generate
 
+      # TEMPORARY diagnostic step - remove once the ATS/version mystery is
+      # resolved. TestFlight has shown "1.0" as the app version on every
+      # build 1-12, though project.yml has never set MARKETING_VERSION to
+      # "1.0" - and a plain-http Xtream login keeps failing with the ATS
+      # -1022 error despite NSAllowsArbitraryLoads: true being present in
+      # project.yml at every commit since build 8. Rather than guess again,
+      # this prints exactly what XcodeGen actually generated and exactly
+      # what build settings Xcode resolves at archive time, so the next log
+      # shows the real Info.plist content and real MARKETING_VERSION value
+      # instead of what the YAML source merely says.
+      - name: "DIAGNOSTIC: dump generated Info.plist and resolved build settings"
+        run: |
+          set -euo pipefail
+          echo "===== Every Info.plist under ipad/ ====="
+          find ipad -iname "Info.plist" -print
+          echo
+          for f in $(find ipad -iname "Info.plist"); do
+            echo "----- $f (raw) -----"
+            cat "$f"
+            echo
+            echo "----- $f (plutil -p) -----"
+            plutil -p "$f" || true
+            echo
+          done
+          echo "===== Resolved build settings (Release config) ====="
+          xcodebuild -showBuildSettings \
+            -project ipad/TapperIPad.xcodeproj \
+            -scheme TapperIPad \
+            -configuration Release \
+            2>&1 | grep -E "MARKETING_VERSION|CURRENT_PROJECT_VERSION|INFOPLIST_FILE|GENERATE_INFOPLIST_FILE|PRODUCT_BUNDLE_IDENTIFIER|INFOPLIST_KEY_" || true
+
       # Imports the distribution certificate + provisioning profile you
       # created in Phase 0 into a throwaway keychain scoped to this run only.
       # Required secrets (repo Settings → Secrets and variables → Actions):
@@ -167,4 +198,4 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8 \
             -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+            -authenticationKeyIssuerID "$APP_%STORE_CONNECT_ISSUER_ID"
