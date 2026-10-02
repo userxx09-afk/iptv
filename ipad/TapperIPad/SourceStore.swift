@@ -30,6 +30,21 @@ struct TvSource: Identifiable, Codable, Equatable {
         epgUrlOverride: nil,
         builtIn: true
     )
+
+    /// Same shortcut Fire TV offers via its hidden ten-tap gesture on
+    /// Settings (MainActivity.addHiddenXtreamSource) - same id, name, host
+    /// and credentials, so this lines up with the Android side exactly.
+    /// Shown by default here rather than hidden, per request. Not marked
+    /// builtIn: like on Fire TV, it's an ordinary, removable source once
+    /// added - only iptv-org above is permanent.
+    static let prime4tv = TvSource(
+        id: "xtream-prime4tv-hidden",
+        name: "Prime4TV",
+        kind: .xtream,
+        location: "http://line.prime4tv.com",
+        epgUrlOverride: nil,
+        builtIn: false
+    )
 }
 
 /// Stores the list of configured sources and which one is active. Plain
@@ -42,15 +57,43 @@ final class SourceStore {
     private let defaults = UserDefaults.standard
     private let sourcesKey = "tapper.sources"
     private let activeKey = "tapper.activeSourceId"
+    private let seededPrime4tvKey = "tapper.seededPrime4tv"
 
-    private init() {}
+    private init() {
+        seedPrime4tvIfNeeded()
+    }
 
-    func all() -> [TvSource] {
+    /// Adds Prime4TV (with its credentials) exactly once, the first time
+    /// this runs on a device, so it shows up alongside iptv-org without
+    /// waiting on the user to add it by hand. Gated on its own flag rather
+    /// than folded into the read path in `all()` below, so removing it
+    /// afterward (it's an ordinary, removable source - see TvSource.prime4tv)
+    /// sticks instead of being silently re-added on the next launch.
+    private func seedPrime4tvIfNeeded() {
+        guard !defaults.bool(forKey: seededPrime4tvKey) else { return }
+        defaults.set(true, forKey: seededPrime4tvKey)
+        let current = rawSources()
+        guard !current.contains(where: { $0.id == TvSource.prime4tv.id }) else { return }
+        CredentialVault.put(sourceId: TvSource.prime4tv.id, username: "70405ae64f", password: "ae1752cd23")
+        saveRaw(current + [TvSource.prime4tv])
+    }
+
+    private func rawSources() -> [TvSource] {
         guard
             let data = defaults.data(forKey: sourcesKey),
-            let list = try? JSONDecoder().decode([TvSource].self, from: data),
-            !list.isEmpty
-        else { return [.builtIn] }
+            let list = try? JSONDecoder().decode([TvSource].self, from: data)
+        else { return [] }
+        return list
+    }
+
+    private func saveRaw(_ sources: [TvSource]) {
+        guard let data = try? JSONEncoder().encode(sources) else { return }
+        defaults.set(data, forKey: sourcesKey)
+    }
+
+    func all() -> [TvSource] {
+        let list = rawSources()
+        guard !list.isEmpty else { return [.builtIn] }
         // The built-in source is never removable - deleting it would leave a
         // new user with no obvious way back in, same reasoning as Fire TV.
         if list.contains(where: { $0.builtIn }) { return list }
@@ -58,8 +101,7 @@ final class SourceStore {
     }
 
     func save(_ sources: [TvSource]) {
-        guard let data = try? JSONEncoder().encode(sources) else { return }
-        defaults.set(data, forKey: sourcesKey)
+        saveRaw(sources)
     }
 
     func add(_ source: TvSource) {
