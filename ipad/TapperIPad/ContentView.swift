@@ -70,7 +70,7 @@ struct ContentView: View {
                 if !hasContent {
                     loadForm
                 } else if !playlistLoader.channels.isEmpty {
-                    channelList(playlistLoader.channels)
+                    channelList(playlistLoader.channels, namespace: "playlist")
                 } else {
                     xtreamTabs
                 }
@@ -83,6 +83,12 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Sources") { activeSheet = .sources }
+                }
+                // A per-stream preference, not tied to whether a source is
+                // loaded - shown alongside Sources rather than gated on
+                // hasContent, so it's there to set before connecting too.
+                ToolbarItem(placement: .topBarTrailing) {
+                    bufferingMenu
                 }
                 if hasContent {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -348,9 +354,9 @@ struct ContentView: View {
                     .padding(.horizontal)
             }
             TabView {
-                channelList(xtreamLoader.liveChannels)
+                channelList(xtreamLoader.liveChannels, namespace: "live")
                     .tabItem { Label("Live", systemImage: "tv") }
-                channelList(xtreamLoader.movies)
+                channelList(xtreamLoader.movies, namespace: "movie")
                     .tabItem { Label("Movies", systemImage: "film") }
                 seriesList
                     .tabItem { Label("Shows", systemImage: "tv.badge.wifi") }
@@ -362,17 +368,23 @@ struct ContentView: View {
     // fetches its episodes on demand), so it stays a NavigationLink into
     // EpisodeListView rather than a play button - CategoryFilteredList only
     // takes over the category chips/grouping here, not the tap behavior.
+    // FavoriteButton sits outside the NavigationLink in its own HStack slot
+    // so starring a show doesn't also push EpisodeListView.
     private var seriesList: some View {
-        CategoryFilteredList(channels: xtreamLoader.series) { item in
-            NavigationLink {
-                EpisodeListView(loader: xtreamLoader, seriesItem: item)
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.name).font(.body)
-                    if let group = item.group {
-                        Text(group).font(.caption).foregroundStyle(.secondary)
+        CategoryFilteredList(channels: xtreamLoader.series, categoryNamespace: "series") { item in
+            HStack {
+                NavigationLink {
+                    EpisodeListView(loader: xtreamLoader, seriesItem: item)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name).font(.body)
+                        if let group = item.group {
+                            Text(group).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
+                Spacer()
+                FavoriteButton(sourceId: item.sourceId, channelId: item.id)
             }
         }
     }
@@ -383,23 +395,53 @@ struct ContentView: View {
     // mms/mmsh/rtmp/rtsp entries M3uParser already flags as unplayable (see
     // its own doc comment) so tapping one shows a greyed-out row instead of
     // a silent no-op or a PlayerView that can only fail immediately.
-    private func channelList(_ channels: [Channel]) -> some View {
-        CategoryFilteredList(channels: channels) { channel in
-            Button {
-                playingChannel = channel
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(channel.name)
-                        .font(.body)
-                        .foregroundStyle(channel.isPlayable ? Color.primary : Color.secondary)
-                    if let group = channel.group {
-                        Text(group)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+    // categoryNamespace is a plain String (not Channel.kind) because the
+    // same function serves Live, Movies and the M3U playlist list, and this
+    // avoids relying on how a Kotlin enum bridges into Swift for something
+    // that's purely a UserDefaults storage key here.
+    private func channelList(_ channels: [Channel], namespace: String) -> some View {
+        CategoryFilteredList(channels: channels, categoryNamespace: namespace) { channel in
+            HStack {
+                Button {
+                    playingChannel = channel
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(channel.name)
+                            .font(.body)
+                            .foregroundStyle(channel.isPlayable ? Color.primary : Color.secondary)
+                        if let group = channel.group {
+                            Text(group)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .disabled(!channel.isPlayable)
+                Spacer()
+                FavoriteButton(sourceId: channel.sourceId, channelId: channel.id)
+            }
+        }
+    }
+
+    // One menu, not a full Settings screen - there isn't one yet for iPad.
+    // Takes effect on the next stream start (TapperPlayer.swift reads it
+    // fresh each time), not whatever's already playing - same as Fire TV's
+    // equivalent control.
+    private var bufferingMenu: some View {
+        Menu {
+            ForEach(BufferSize.allCases) { size in
+                Button {
+                    PlayerSettingsStore.shared.bufferSize = size
+                } label: {
+                    if PlayerSettingsStore.shared.bufferSize == size {
+                        Label(size.label, systemImage: "checkmark")
+                    } else {
+                        Text(size.label)
                     }
                 }
             }
-            .disabled(!channel.isPlayable)
+        } label: {
+            Label("Buffering", systemImage: "antenna.radiowaves.left.and.right")
         }
     }
 }

@@ -1,22 +1,10 @@
 import SwiftUI
 import TapperCore
 
-// Swift doesn't allow a stored `static let` inside a generic type
-// (CategoryFilteredList<RowContent> below is generic over its row view), so
-// this lives at file scope instead of as a member.
-private let categoryPriorityTokens: Set<Substring> = ["US", "USA", "ENGLISH", "EN"]
-
-// Whole-token match only - splitting on non-letters so "Music" or "Russia"
-// (which merely contain "us") can't false-positive against the short
-// "US"/"EN" tokens the way a substring check would. Shared by the list
-// ordering below and by CategoryPickerSheet's own "Suggested" section, so
-// the two agree on what counts as priority.
-private func isPriorityCategory(_ category: String) -> Bool {
-    let upper = category.uppercased()
-    if upper.contains("UNITED STATES") { return true }
-    return upper.split(whereSeparator: { !$0.isLetter })
-        .contains { categoryPriorityTokens.contains($0) }
-}
+/// Distinct enough not to collide with any real category name a provider
+/// might use, and shared by CategoryFilteredList (filtering) and
+/// CategoryPickerSheet (the selectable row) below.
+private let favoritesPseudoCategory = "\u{2605} Favorites"
 
 /// Groups a channel list by category and lets the user filter to one - the
 /// iPad-sized first slice of Fire TV's BrowseScreen category picker (which
@@ -33,12 +21,26 @@ private func isPriorityCategory(_ category: String) -> Bool {
 /// source like iptv-org has one category per country - several hundred -
 /// and a chip strip that long means swiping past a hundred others to find
 /// "Spain." A search field turns that into typing a few letters.
+///
+/// Category ordering used to auto-promote anything that looked US/English
+/// ("US", "USA", "English", country name containing "United States") ahead
+/// of everything else, picked for the app rather than by anyone using it.
+/// That's gone - ordering is now driven entirely by categories the user has
+/// actually pinned (FavoritesStore), and individual channels/shows can be
+/// starred the same way, surfaced here as a selectable "Favorites" entry.
 struct CategoryFilteredList<RowContent: View>: View {
     let channels: [Channel]
+    /// Storage namespace for this list's pinned categories - "live",
+    /// "movie", "series", "playlist" from ContentView's call sites. Kept
+    /// separate per list: Movies and Shows don't share a category
+    /// namespace, and a provider could plausibly reuse the same category
+    /// name for genuinely different things in each.
+    let categoryNamespace: String
     @ViewBuilder let row: (Channel) -> RowContent
 
     @State private var selectedCategory: String?
     @State private var showingCategoryPicker = false
+    @ObservedObject private var favorites = FavoritesStore.shared
 
     private func categoryNames(for channel: Channel) -> [String] {
         if !channel.categories.isEmpty {
@@ -47,12 +49,13 @@ struct CategoryFilteredList<RowContent: View>: View {
         return [channel.group ?? "Uncategorized"]
     }
 
-    // Country/language catalogues on these sources run into the hundreds
-    // (iptv-org alone has one category per country), so a plain alphabetical
-    // sort buries US/English content under "Albania", "Argentina", etc.
-    // Rather than hide everything else, this just promotes the categories
-    // most people here actually want to the front of the list - "All" stays
-    // first, then these, then the rest alphabetically same as before.
+    private func isPinned(_ category: String) -> Bool {
+        favorites.isPinnedCategory(namespace: categoryNamespace, category: category)
+    }
+
+    // Pinned categories first (whatever the user has starred in the picker
+    // sheet - nothing promoted automatically), then everything else
+    // alphabetically, same as before.
     private var categories: [String] {
         var seen = Set<String>()
         var ordered: [String] = []
@@ -62,19 +65,29 @@ struct CategoryFilteredList<RowContent: View>: View {
                 ordered.append(name)
             }
         }
-        let priority = ordered.filter(isPriorityCategory).sorted()
-        let rest = ordered.filter { !isPriorityCategory($0) }.sorted()
-        return priority + rest
+        let pinned = ordered.filter(isPinned).sorted()
+        let rest = ordered.filter { !isPinned($0) }.sorted()
+        return pinned + rest
     }
 
+    private var hasFavorites: Bool { favorites.hasAnyFavorite(in: channels) }
+
     private var filtered: [Channel] {
+        if selectedCategory == favoritesPseudoCategory {
+            return channels.filter { favorites.isFavorite(sourceId: $0.sourceId, channelId: $0.id) }
+        }
         guard let selectedCategory else { return channels }
         return channels.filter { categoryNames(for: $0).contains(selectedCategory) }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if categories.count > 1 {
+            // selectedCategory != nil keeps the bar (and its clear button)
+            // visible even if a filter becomes degenerate while active -
+            // e.g. unstarring the last favorite while viewing Favorites,
+            // which drops hasFavorites to false but shouldn't strand the
+            // user on an empty list with no way back to "All Categories".
+            if categories.count > 1 || hasFavorites || selectedCategory != nil {
                 categoryBar
                 Divider()
             }
@@ -84,14 +97,33 @@ struct CategoryFilteredList<RowContent: View>: View {
             // Picking a category can empty the on-screen list if that
             // category's only channel was just removed by a source switch -
             // resetting here keeps a stale filter from hiding everything.
+            // Favorites isn't a real category name, so it's checked
+            // separately rather than against the `categories` list.
             .onChange(of: channels.map(\.id)) { _, _ in
-                if let selectedCategory, !categories.contains(selectedCategory) {
+                guard let selectedCategory else { return }
+                if selectedCategory == favoritesPseudoCategory {
+                    if !hasFavorites { self.selectedCategory = nil }
+                } else if !categories.contains(selectedCategory) {
                     self.selectedCategory = nil
+                }
+            }
+            // Unstarring the last favorite while viewing Favorites - caught
+            // separately from the onChange above, since that one only fires
+            // when the channel list itself changes, not when a favorite is
+            // toggled.
+            .onChange(of: hasFavorites) { _, nowHasFavorites in
+                if !nowHasFavorites, selectedCategory == favoritesPseudoCategory {
+                    selectedCategory = nil
                 }
             }
         }
         .sheet(isPresented: $showingCategoryPicker) {
-            CategoryPickerSheet(categories: categories, selected: selectedCategory) { choice in
+            CategoryPickerSheet(
+                categoryNamespace: categoryNamespace,
+                categories: categories,
+                showFavoritesOption: hasFavorites,
+                selected: selectedCategory
+            ) { choice in
                 selectedCategory = choice
                 showingCategoryPicker = false
             }
@@ -104,6 +136,11 @@ struct CategoryFilteredList<RowContent: View>: View {
                 showingCategoryPicker = true
             } label: {
                 HStack(spacing: 6) {
+                    if selectedCategory == favoritesPseudoCategory {
+                        Image(systemName: "star.fill")
+                            .font(.caption)
+                            .foregroundStyle(.yellow)
+                    }
                     Text(selectedCategory ?? "All Categories")
                         .font(.subheadline.weight(.medium))
                         .lineLimit(1)
@@ -140,19 +177,26 @@ struct CategoryFilteredList<RowContent: View>: View {
 }
 
 /// Searchable picker for one category out of - on a source like iptv-org -
-/// several hundred. Sectioned the same priority-then-alphabetical way as the
-/// list's own ordering, so US/English categories surface first with nothing
-/// typed; typing narrows both sections to a case-insensitive substring match.
+/// several hundred. Pinned categories (starred by the user, from this same
+/// sheet) surface first under "Pinned" with nothing typed; typing narrows
+/// both sections to a case-insensitive substring match.
 private struct CategoryPickerSheet: View {
+    let categoryNamespace: String
     let categories: [String]
+    let showFavoritesOption: Bool
     let selected: String?
     let onSelect: (String?) -> Void
 
     @State private var search = ""
+    @ObservedObject private var favorites = FavoritesStore.shared
     @Environment(\.dismiss) private var dismiss
 
-    private var priority: [String] { categories.filter(isPriorityCategory) }
-    private var rest: [String] { categories.filter { !isPriorityCategory($0) } }
+    private func isPinned(_ category: String) -> Bool {
+        favorites.isPinnedCategory(namespace: categoryNamespace, category: category)
+    }
+
+    private var pinned: [String] { categories.filter(isPinned) }
+    private var rest: [String] { categories.filter { !isPinned($0) } }
 
     private func matches(_ category: String) -> Bool {
         search.isEmpty || category.localizedCaseInsensitiveContains(search)
@@ -174,10 +218,25 @@ private struct CategoryPickerSheet: View {
                 }
                 .foregroundStyle(.primary)
 
-                let shownPriority = priority.filter(matches)
-                if !shownPriority.isEmpty {
-                    Section("Suggested") {
-                        ForEach(shownPriority, id: \.self) { category in
+                if showFavoritesOption {
+                    Button {
+                        onSelect(favoritesPseudoCategory)
+                    } label: {
+                        HStack {
+                            Label("Favorites", systemImage: "star.fill")
+                                .foregroundStyle(.yellow)
+                            Spacer()
+                            if selected == favoritesPseudoCategory {
+                                Image(systemName: "checkmark").foregroundStyle(.blue)
+                            }
+                        }
+                    }
+                }
+
+                let shownPinned = pinned.filter(matches)
+                if !shownPinned.isEmpty {
+                    Section("Pinned") {
+                        ForEach(shownPinned, id: \.self) { category in
                             categoryRow(category)
                         }
                     }
@@ -203,19 +262,34 @@ private struct CategoryPickerSheet: View {
         }
     }
 
+    // Two independent tap targets in one row - the name selects the
+    // category, the pin toggles it - each its own plain-style Button so
+    // neither swallows the other's taps inside the List row.
     @ViewBuilder
     private func categoryRow(_ category: String) -> some View {
-        Button {
-            onSelect(category)
-        } label: {
-            HStack {
-                Text(category)
-                Spacer()
-                if selected == category {
-                    Image(systemName: "checkmark").foregroundStyle(.blue)
+        HStack {
+            Button {
+                onSelect(category)
+            } label: {
+                HStack {
+                    Text(category)
+                    Spacer()
+                    if selected == category {
+                        Image(systemName: "checkmark").foregroundStyle(.blue)
+                    }
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(.primary)
+
+            Button {
+                favorites.togglePinnedCategory(namespace: categoryNamespace, category: category)
+            } label: {
+                Image(systemName: isPinned(category) ? "pin.fill" : "pin")
+                    .foregroundStyle(isPinned(category) ? Color.blue : Color.secondary)
+            }
+            .buttonStyle(.plain)
         }
-        .foregroundStyle(.primary)
     }
 }

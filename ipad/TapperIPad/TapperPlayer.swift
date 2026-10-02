@@ -28,11 +28,19 @@ final class TapperPlayer: ObservableObject {
     private var startedAt = Date()
     private var renderedFrames = false
 
+    // Separate from `attempt` above, which moves to a different *feed*.
+    // This counts retries of the *same* feed after what looks like a
+    // transient connection drop rather than a real failure - see
+    // handleFailure's own comment for why this exists.
+    private var transientRetries = 0
+    private let maxTransientRetries = 2
+
     private var itemStatusObservation: NSKeyValueObservation?
     private var failureObserver: NSObjectProtocol?
 
     func play(_ channel: Channel) {
         attempt = 0
+        transientRetries = 0
         diagnosisMessage = nil
 
         guard let first = channel.streams.first else {
@@ -79,6 +87,13 @@ final class TapperPlayer: ObservableObject {
 
         let asset = AVURLAsset(url: url, options: options)
         let item = AVPlayerItem(asset: asset)
+        // Configurable from the toolbar's Buffering menu (ContentView.swift
+        // + PlayerSettings.swift) - how many seconds of media AVPlayer tries
+        // to keep buffered ahead of the playhead. 0 (Small) leaves this to
+        // AVPlayer's own default; anything larger trades a slower start for
+        // more cushion against the network drops/hiccups that show up as
+        // stalls or rebuffering mid-stream.
+        item.preferredForwardBufferDuration = PlayerSettingsStore.shared.bufferSize.forwardBufferSeconds
 
         tearDownObservers()
 
@@ -93,6 +108,10 @@ final class TapperPlayer: ObservableObject {
                 case .readyToPlay:
                     self.isBuffering = false
                     self.renderedFrames = true
+                    // A later stall in this same playback session gets its
+                    // own fresh retry budget rather than inheriting however
+                    // many of these were already spent getting here.
+                    self.transientRetries = 0
                 case .failed:
                     self.handleFailure(channel: channel, error: observedItem.error as NSError?)
                 default:
@@ -122,10 +141,32 @@ final class TapperPlayer: ObservableObject {
         let next = channel.streams.count > attempt + 1 ? channel.streams[attempt + 1] : nil
         if let next, M3uParser.shared.isPlayable(url: next.url) {
             attempt += 1
+            transientRetries = 0
             startStream(channel: channel, stream: next)
             return
         }
         let (httpStatus, socketError) = classify(error: error)
+
+        // No HTTP status at all plus a recognized socket-error code (timed
+        // out, connection lost, not connected, DNS failure - see classify
+        // above) looks like a dropped connection, not a real answer from
+        // the server - retrying a definitive 403/404 would just ask the
+        // same question again, but a connection that was lost can often be
+        // reopened immediately. Same reasoning as the short retry already
+        // added to XtreamClient.fetch() for the API calls: AVFoundation
+        // doesn't quietly retry a request the way ExoPlayer's pipeline
+        // often does on Fire TV, so a brief network blip here otherwise
+        // ends playback outright instead of recovering on its own.
+        if httpStatus == nil, socketError, transientRetries < maxTransientRetries {
+            transientRetries += 1
+            let stream = channel.streams[attempt]
+            let delay = DispatchTimeInterval.milliseconds(600 * transientRetries)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.startStream(channel: channel, stream: stream)
+            }
+            return
+        }
+
         explain(httpStatus: httpStatus, socketError: socketError, rawError: error)
     }
 
