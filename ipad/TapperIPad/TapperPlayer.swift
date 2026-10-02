@@ -1,5 +1,5 @@
 import AVFoundation
-import TapperCore
+@preconcurrency import TapperCore
 
 /// AVPlayer wrapper mirroring Fire TV's TapperPlayer.kt: per-stream request
 /// headers, silent failover across alternate feeds before bothering the
@@ -61,19 +61,20 @@ final class TapperPlayer: ObservableObject {
         }
 
         var options: [String: Any] = [:]
-        // StreamRef.headers is a Kotlin Map<String, String> - iterated
-        // generically with an `as?` cast on each side rather than assumed
-        // to present as a precise [String: String] in Swift, since the
-        // exact bridged shape of a generic Kotlin Map isn't something to
-        // bet on without a compiler to check it against.
-        var plainHeaders: [String: String] = [:]
-        for (key, value) in stream.headers {
-            if let k = key as? String, let v = value as? String {
-                plainHeaders[k] = v
-            }
-        }
-        if !plainHeaders.isEmpty {
-            options[AVURLAssetHTTPHeaderFieldsKey] = plainHeaders
+        // StreamRef.headers (Kotlin Map<String, String>) bridges straight to
+        // a Swift [String: String] - confirmed by a real compile (an earlier
+        // defensive `as? String` cast on each key/value here came back as
+        // "always succeeds", i.e. the compiler already sees String on both
+        // sides), so no generic Any-keyed iteration is needed.
+        //
+        // AVURLAssetHTTPHeaderFieldsKey itself isn't visible as a Swift
+        // symbol on this SDK (Xcode 26 marks several legacy AVFoundation
+        // NSString key constants Swift-unavailable), so the key is spelled
+        // as the literal string Apple's docs give for it - the underlying
+        // options-dictionary key AVPlayer reads, unchanged by that
+        // Swift-visibility change.
+        if !stream.headers.isEmpty {
+            options["AVURLAssetHTTPHeaderFieldsKey"] = stream.headers
         }
 
         let asset = AVURLAsset(url: url, options: options)
@@ -128,13 +129,16 @@ final class TapperPlayer: ObservableObject {
         explain(httpStatus: httpStatus, socketError: socketError)
     }
 
+    // AVErrorHTTPStatusCodeKey, like AVURLAssetHTTPHeaderFieldsKey above,
+    // isn't visible as a Swift symbol on this SDK - spelled as the literal
+    // string instead, which is the actual userInfo key AVFoundation writes.
     private func classify(error: NSError?) -> (httpStatus: Int?, socketError: Bool) {
         guard let error else { return (nil, true) }
-        if let status = error.userInfo[AVErrorHTTPStatusCodeKey] as? Int {
+        if let status = error.userInfo["AVErrorHTTPStatusCodeKey"] as? Int {
             return (status, false)
         }
         if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError,
-           let status = underlying.userInfo[AVErrorHTTPStatusCodeKey] as? Int {
+           let status = underlying.userInfo["AVErrorHTTPStatusCodeKey"] as? Int {
             return (status, false)
         }
         let socketCodes: Set<Int> = [

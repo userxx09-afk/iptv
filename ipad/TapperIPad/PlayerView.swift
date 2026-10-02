@@ -5,7 +5,7 @@ import TapperCore
 /// Lets a Kotlin Channel back a SwiftUI `.fullScreenCover(item:)`/`List`
 /// selection - pure Swift-side protocol conformance (Channel already has a
 /// matching `id: String`), no Kotlin/Native interop involved.
-extension Channel: Identifiable {}
+extension Channel: @retroactive Identifiable {}
 
 /// Full-screen playback. Basic tier: AVPlayer wrapper with the same
 /// per-stream headers, multi-feed failover and failure diagnosis as Fire
