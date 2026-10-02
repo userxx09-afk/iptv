@@ -21,8 +21,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.5.0"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "0.6.0"
+    CURRENT_PROJECT_VERSION: "10"
     # iPad only (device family 2) — this is the iPad app, not a universal
     # iPhone/iPad build. Revisit if that ever changes.
     TARGETED_DEVICE_FAMILY: "2"
@@ -78,25 +78,32 @@ targets:
         # app controls, a per-domain NSExceptionDomains allowlist isn't
         # workable here - NSAllowsArbitraryLoads is the correct, deliberate
         # choice for this app's use case, not a shortcut.
+        #
+        # IMPORTANT - do not add NSAllowsArbitraryLoadsForMedia,
+        # NSAllowsArbitraryLoadsInWebContent, or NSAllowsLocalNetworking
+        # alongside this. Apple's own docs for NSAllowsArbitraryLoads say:
+        # "the value of the NSAllowsArbitraryLoads key is ignored - and the
+        # default value of NO used instead - if any of the following keys
+        # are present" (listing exactly those three). A previous round added
+        # NSAllowsArbitraryLoadsForMedia here to try to fix AVPlayer
+        # playback, which silently reset NSAllowsArbitraryLoads to NO for
+        # every *other* request (Xtream login/catalogue calls through
+        # Ktor's Darwin/URLSession engine) even though the key was still
+        # sitting right here reading `true` - confirmed via a CI diagnostic
+        # dump of the actual shipped Info.plist, which showed both keys
+        # present and `true` while http Xtream login still failed with the
+        # exact same -1022 error. NSAllowsArbitraryLoads alone already
+        # covers *all* network connections per Apple's docs, AVPlayer/
+        # AVFoundation media included - it was never actually scoped to
+        # exclude media, so no second key is needed here at all.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-          # NSAllowsArbitraryLoads alone covers "normal" app networking
-          # (URLSession, Ktor's Darwin engine - this is why login/catalogue
-          # loading over http:// already works). It does NOT, on its own,
-          # cover media actually loaded through AVFoundation/AVPlayer - that
-          # has always been evaluated against ATS separately, which is
-          # exactly the gap behind "the directory loads but nothing plays":
-          # every stream request was being silently refused by ATS before
-          # AVPlayer ever saw a byte, the same -1022-shaped failure as the
-          # login issue above, just on a different code path. This is the
-          # dedicated media exemption for that path.
-          NSAllowsArbitraryLoadsForMedia: true
     # Code signing is deliberately NOT configured here. CI passes
     # CODE_SIGN_STYLE/DEVELOPMENT_TEAM/PROVISIONING_PROFILE_SPECIFIER as
-    # xcodebuild command-line overrides at archive time instead (see the
+    # xcodebuild* command-line overrides at archive time instead (see the
     # workflow) — keeps this file identical whether you're building locally
     # (Automatic signing in Xcode's UI) or in CI (manual, from secrets).
     dependencies:
       - framework: ../shared/build/XCFrameworks/release/TapperCore.xcframework
-        embed: true
+        embed*: true
         codeSign: true
