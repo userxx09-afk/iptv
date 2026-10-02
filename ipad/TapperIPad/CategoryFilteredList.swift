@@ -1,6 +1,11 @@
 import SwiftUI
 import TapperCore
 
+// Swift doesn't allow a stored `static let` inside a generic type
+// (CategoryFilteredList<RowContent> below is generic over its row view), so
+// this lives at file scope instead of as a member.
+private let categoryPriorityTokens: Set<Substring> = ["US", "USA", "ENGLISH", "EN"]
+
 /// Groups a channel list by category and lets the user filter to one - the
 /// iPad-sized first slice of Fire TV's BrowseScreen category picker (which
 /// also adds a country dimension and remembers the last-viewed category per
@@ -29,8 +34,6 @@ struct CategoryFilteredList<RowContent: View>: View {
     // Rather than hide everything else, this just promotes the categories
     // most people here actually want to the front of the row - "All" stays
     // first, then these, then the rest alphabetically same as before.
-    private static let priorityTokens: Set<Substring> = ["US", "USA", "ENGLISH", "EN"]
-
     private func isPriority(_ category: String) -> Bool {
         let upper = category.uppercased()
         if upper.contains("UNITED STATES") { return true }
@@ -38,7 +41,7 @@ struct CategoryFilteredList<RowContent: View>: View {
         // "Russia" (which merely contain "us") can't false-positive against
         // the short "US"/"EN" tokens the way a substring check would.
         return upper.split(whereSeparator: { !$0.isLetter })
-            .contains { Self.priorityTokens.contains($0) }
+            .contains { categoryPriorityTokens.contains($0) }
     }
 
     private var categories: [String] {
