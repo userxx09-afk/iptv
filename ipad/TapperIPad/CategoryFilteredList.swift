@@ -6,6 +6,18 @@ import TapperCore
 // this lives at file scope instead of as a member.
 private let categoryPriorityTokens: Set<Substring> = ["US", "USA", "ENGLISH", "EN"]
 
+// Whole-token match only - splitting on non-letters so "Music" or "Russia"
+// (which merely contain "us") can't false-positive against the short
+// "US"/"EN" tokens the way a substring check would. Shared by the list
+// ordering below and by CategoryPickerSheet's own "Suggested" section, so
+// the two agree on what counts as priority.
+private func isPriorityCategory(_ category: String) -> Bool {
+    let upper = category.uppercased()
+    if upper.contains("UNITED STATES") { return true }
+    return upper.split(whereSeparator: { !$0.isLetter })
+        .contains { categoryPriorityTokens.contains($0) }
+}
+
 /// Groups a channel list by category and lets the user filter to one - the
 /// iPad-sized first slice of Fire TV's BrowseScreen category picker (which
 /// also adds a country dimension and remembers the last-viewed category per
@@ -15,11 +27,18 @@ private let categoryPriorityTokens: Set<Substring> = ["US", "USA", "ENGLISH", "E
 /// Falls back to `group` when `categories` is empty - Xtream sources
 /// populate categories directly, but a plain M3U channel only ever has
 /// group-title, so this keeps both source types groupable the same way.
+///
+/// Category *selection* is a button that opens a searchable sheet
+/// (CategoryPickerSheet below), not a horizontally-scrolling chip row. A
+/// source like iptv-org has one category per country - several hundred -
+/// and a chip strip that long means swiping past a hundred others to find
+/// "Spain." A search field turns that into typing a few letters.
 struct CategoryFilteredList<RowContent: View>: View {
     let channels: [Channel]
     @ViewBuilder let row: (Channel) -> RowContent
 
     @State private var selectedCategory: String?
+    @State private var showingCategoryPicker = false
 
     private func categoryNames(for channel: Channel) -> [String] {
         if !channel.categories.isEmpty {
@@ -32,18 +51,8 @@ struct CategoryFilteredList<RowContent: View>: View {
     // (iptv-org alone has one category per country), so a plain alphabetical
     // sort buries US/English content under "Albania", "Argentina", etc.
     // Rather than hide everything else, this just promotes the categories
-    // most people here actually want to the front of the row - "All" stays
+    // most people here actually want to the front of the list - "All" stays
     // first, then these, then the rest alphabetically same as before.
-    private func isPriority(_ category: String) -> Bool {
-        let upper = category.uppercased()
-        if upper.contains("UNITED STATES") { return true }
-        // Whole-token match only - splitting on non-letters so "Music" or
-        // "Russia" (which merely contain "us") can't false-positive against
-        // the short "US"/"EN" tokens the way a substring check would.
-        return upper.split(whereSeparator: { !$0.isLetter })
-            .contains { categoryPriorityTokens.contains($0) }
-    }
-
     private var categories: [String] {
         var seen = Set<String>()
         var ordered: [String] = []
@@ -53,8 +62,8 @@ struct CategoryFilteredList<RowContent: View>: View {
                 ordered.append(name)
             }
         }
-        let priority = ordered.filter(isPriority).sorted()
-        let rest = ordered.filter { !isPriority($0) }.sorted()
+        let priority = ordered.filter(isPriorityCategory).sorted()
+        let rest = ordered.filter { !isPriorityCategory($0) }.sorted()
         return priority + rest
     }
 
@@ -66,20 +75,7 @@ struct CategoryFilteredList<RowContent: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             if categories.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        categoryChip(title: "All", isSelected: selectedCategory == nil) {
-                            selectedCategory = nil
-                        }
-                        ForEach(categories, id: \.self) { category in
-                            categoryChip(title: category, isSelected: selectedCategory == category) {
-                                selectedCategory = category
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                }
+                categoryBar
                 Divider()
             }
             List(filtered, id: \.id) { channel in
@@ -94,18 +90,132 @@ struct CategoryFilteredList<RowContent: View>: View {
                 }
             }
         }
+        .sheet(isPresented: $showingCategoryPicker) {
+            CategoryPickerSheet(categories: categories, selected: selectedCategory) { choice in
+                selectedCategory = choice
+                showingCategoryPicker = false
+            }
+        }
     }
 
-    private func categoryChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline)
+    private var categoryBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                showingCategoryPicker = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text(selectedCategory ?? "All Categories")
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.15))
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                .background(Color.secondary.opacity(0.15))
+                .foregroundStyle(Color.primary)
                 .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            if selectedCategory != nil {
+                Button {
+                    selectedCategory = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+
+            Text("\(categories.count) categories")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+}
+
+/// Searchable picker for one category out of - on a source like iptv-org -
+/// several hundred. Sectioned the same priority-then-alphabetical way as the
+/// list's own ordering, so US/English categories surface first with nothing
+/// typed; typing narrows both sections to a case-insensitive substring match.
+private struct CategoryPickerSheet: View {
+    let categories: [String]
+    let selected: String?
+    let onSelect: (String?) -> Void
+
+    @State private var search = ""
+    @Environment(\.dismiss) private var dismiss
+
+    private var priority: [String] { categories.filter(isPriorityCategory) }
+    private var rest: [String] { categories.filter { !isPriorityCategory($0) } }
+
+    private func matches(_ category: String) -> Bool {
+        search.isEmpty || category.localizedCaseInsensitiveContains(search)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Button {
+                    onSelect(nil)
+                } label: {
+                    HStack {
+                        Text("All Categories")
+                        Spacer()
+                        if selected == nil {
+                            Image(systemName: "checkmark").foregroundStyle(.blue)
+                        }
+                    }
+                }
+                .foregroundStyle(.primary)
+
+                let shownPriority = priority.filter(matches)
+                if !shownPriority.isEmpty {
+                    Section("Suggested") {
+                        ForEach(shownPriority, id: \.self) { category in
+                            categoryRow(category)
+                        }
+                    }
+                }
+
+                let shownRest = rest.filter(matches)
+                if !shownRest.isEmpty {
+                    Section("All") {
+                        ForEach(shownRest, id: \.self) { category in
+                            categoryRow(category)
+                        }
+                    }
+                }
+            }
+            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search categories")
+            .navigationTitle("Categories")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func categoryRow(_ category: String) -> some View {
+        Button {
+            onSelect(category)
+        } label: {
+            HStack {
+                Text(category)
+                Spacer()
+                if selected == category {
+                    Image(systemName: "checkmark").foregroundStyle(.blue)
+                }
+            }
+        }
+        .foregroundStyle(.primary)
     }
 }
