@@ -32,6 +32,13 @@ struct ContentView: View {
     @State private var addSourceError: String?
     @State private var pendingSourceSave: PendingSourceSave?
 
+    /// Whatever row was tapped in a live/movie/episode list - drives the
+    /// full-screen player. A series row never sets this directly (it has no
+    /// stream of its own); only EpisodeListView's rows and this view's own
+    /// channel rows do. See PlayerView.swift for Channel's Identifiable
+    /// conformance, required for `.fullScreenCover(item:)` below.
+    @State private var playingChannel: Channel?
+
     private enum SourceMode: String, CaseIterable, Identifiable {
         case playlist = "Playlist URL"
         case xtream = "Xtream Login"
@@ -173,6 +180,9 @@ struct ContentView: View {
                 addSourceError = playlistLoader.errorMessage ?? "Couldn't load this playlist."
                 pendingSourceSave = nil
             }
+        }
+        .fullScreenCover(item: $playingChannel) { channel in
+            PlayerView(channel: channel)
         }
     }
 
@@ -348,8 +358,12 @@ struct ContentView: View {
         }
     }
 
+    // A series row has no stream of its own (XtreamLoader.loadEpisodes
+    // fetches its episodes on demand), so it stays a NavigationLink into
+    // EpisodeListView rather than a play button - CategoryFilteredList only
+    // takes over the category chips/grouping here, not the tap behavior.
     private var seriesList: some View {
-        List(xtreamLoader.series, id: \.id) { item in
+        CategoryFilteredList(channels: xtreamLoader.series) { item in
             NavigationLink {
                 EpisodeListView(loader: xtreamLoader, seriesItem: item)
             } label: {
@@ -363,17 +377,29 @@ struct ContentView: View {
         }
     }
 
+    // Live and movie rows do have a stream, so - unlike seriesList above -
+    // each row is a plain Button that opens PlayerView directly rather than
+    // navigating anywhere. isPlayable guards against the handful of
+    // mms/mmsh/rtmp/rtsp entries M3uParser already flags as unplayable (see
+    // its own doc comment) so tapping one shows a greyed-out row instead of
+    // a silent no-op or a PlayerView that can only fail immediately.
     private func channelList(_ channels: [Channel]) -> some View {
-        List(channels, id: \.id) { channel in
-            VStack(alignment: .leading, spacing: 2) {
-                Text(channel.name)
-                    .font(.body)
-                if let group = channel.group {
-                    Text(group)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        CategoryFilteredList(channels: channels) { channel in
+            Button {
+                playingChannel = channel
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(channel.name)
+                        .font(.body)
+                        .foregroundStyle(channel.isPlayable ? Color.primary : Color.secondary)
+                    if let group = channel.group {
+                        Text(group)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            .disabled(!channel.isPlayable)
         }
     }
 }
