@@ -1,4 +1,4 @@
-package io.tapper.core.xtream
+package io.tapper.core.xtream.multiplatform
 
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
