@@ -23,6 +23,24 @@ struct CategoryFilteredList<RowContent: View>: View {
         return [channel.group ?? "Uncategorized"]
     }
 
+    // Country/language catalogues on these sources run into the hundreds
+    // (iptv-org alone has one category per country), so a plain alphabetical
+    // sort buries US/English content under "Albania", "Argentina", etc.
+    // Rather than hide everything else, this just promotes the categories
+    // most people here actually want to the front of the row - "All" stays
+    // first, then these, then the rest alphabetically same as before.
+    private static let priorityTokens: Set<Substring> = ["US", "USA", "ENGLISH", "EN"]
+
+    private func isPriority(_ category: String) -> Bool {
+        let upper = category.uppercased()
+        if upper.contains("UNITED STATES") { return true }
+        // Whole-token match only - splitting on non-letters so "Music" or
+        // "Russia" (which merely contain "us") can't false-positive against
+        // the short "US"/"EN" tokens the way a substring check would.
+        return upper.split(whereSeparator: { !$0.isLetter })
+            .contains { Self.priorityTokens.contains($0) }
+    }
+
     private var categories: [String] {
         var seen = Set<String>()
         var ordered: [String] = []
@@ -32,7 +50,9 @@ struct CategoryFilteredList<RowContent: View>: View {
                 ordered.append(name)
             }
         }
-        return ordered.sorted()
+        let priority = ordered.filter(isPriority).sorted()
+        let rest = ordered.filter { !isPriority($0) }.sorted()
+        return priority + rest
     }
 
     private var filtered: [Channel] {
