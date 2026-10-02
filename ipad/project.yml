@@ -21,8 +21,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.4.0"
-    CURRENT_PROJECT_VERSION: "8"
+    MARKETING_VERSION: "0.5.0"
+    CURRENT_PROJECT_VERSION: "9"
     # iPad only (device family 2) — this is the iPad app, not a universal
     # iPhone/iPad build. Revisit if that ever changes.
     TARGETED_DEVICE_FAMILY: "2"
@@ -80,6 +80,17 @@ targets:
         # choice for this app's use case, not a shortcut.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+          # NSAllowsArbitraryLoads alone covers "normal" app networking
+          # (URLSession, Ktor's Darwin engine - this is why login/catalogue
+          # loading over http:// already works). It does NOT, on its own,
+          # cover media actually loaded through AVFoundation/AVPlayer - that
+          # has always been evaluated against ATS separately, which is
+          # exactly the gap behind "the directory loads but nothing plays":
+          # every stream request was being silently refused by ATS before
+          # AVPlayer ever saw a byte, the same -1022-shaped failure as the
+          # login issue above, just on a different code path. This is the
+          # dedicated media exemption for that path.
+          NSAllowsArbitraryLoadsForMedia: true
     # Code signing is deliberately NOT configured here. CI passes
     # CODE_SIGN_STYLE/DEVELOPMENT_TEAM/PROVISIONING_PROFILE_SPECIFIER as
     # xcodebuild command-line overrides at archive time instead (see the
