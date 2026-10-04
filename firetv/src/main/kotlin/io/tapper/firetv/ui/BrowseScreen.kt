@@ -129,6 +129,18 @@ private enum class Depth { NAV, COUNTRY, CATEGORY, CHANNELS, GUIDE }
 private enum class NavPreview { KIND, MY_LIST, NONE }
 
 /**
+ * Size of the live picture that keeps playing in the top-right corner after
+ * Back is pressed once in the full-screen player (see PlayerScreen's
+ * `minimized` mode and MainActivity). The width matches the guide column
+ * (300.dp) so the picture sits flush above it; whichever column is
+ * right-most at the current depth drops below the picture (see miniTop in
+ * BrowseScreen), so the right-hand column only ever uses the bottom half.
+ */
+internal val MiniPlayerWidth = 300.dp
+internal val MiniPlayerHeight = 169.dp
+internal val MiniPlayerGap = 12.dp
+
+/**
  * Most accounts are watched overwhelmingly in one language, and re-picking
  * "United States" (or the nearest English-speaking equivalent) every single
  * time a kind is opened wastes a column most viewers never actually want.
@@ -241,6 +253,14 @@ fun BrowseScreen(
     /** Whether a TMDb API key is configured yet - drives MovieInfoPanel's
      *  "add a key in Settings" message versus actually attempting a lookup. */
     tmdbKeyConfigured: Boolean,
+    /** True while a live stream keeps playing in the top-right corner (see
+     *  MiniPlayerWidth) - the right-most column makes room beneath it. */
+    miniPlayerActive: Boolean = false,
+    /** Bumped each time the player drops back to the corner picture; the
+     *  list then navigates to [revealChannel] (the one being watched) and
+     *  puts focus on it, wherever the browse state had wandered to. */
+    revealChannel: Channel? = null,
+    revealToken: Int = 0,
 ) {
     /**
      * Depth follows focus rather than clicks wherever there is a natural
@@ -508,6 +528,9 @@ fun BrowseScreen(
     // arrow-press; this flag scopes the forced re-focus to only the two
     // paths that actually need it.
     var pendingFocus by remember { mutableStateOf<Depth?>(null) }
+    // Row that should receive the "first channel" focus requester instead of
+    // row 0 - set only by the reveal further down, cleared once focus lands.
+    var channelFocusId by remember { mutableStateOf<String?>(null) }
 
     // Shared by the physical Back button and the D-pad LEFT arrow (wired onto
     // each column below) - both should step out exactly one level the same
@@ -571,6 +594,10 @@ fun BrowseScreen(
         }
     }
 
+    // Space the right-most column leaves free at the top for the live corner
+    // picture - see MiniPlayerWidth.
+    val miniTop = if (miniPlayerActive) MiniPlayerHeight + MiniPlayerGap else 0.dp
+
     val navWidth by animateDpAsState(if (depth == Depth.NAV) 300.dp else 64.dp, label = "nav")
     // Each of these is only ever rendered at its 0.dp target - the full/peek
     // states below use weight(1f) or a fixed dp directly instead. The
@@ -629,6 +656,7 @@ fun BrowseScreen(
             Depth.CHANNELS -> requestFocusRetrying(firstChannelFocus)
             else -> {}
         }
+        if (pendingFocus == Depth.CHANNELS) channelFocusId = null
         pendingFocus = null
     }
 
@@ -682,6 +710,50 @@ fun BrowseScreen(
         if (idx >= 0) runCatching { listState.scrollToItem(idx) }
     }
 
+    // Walks the browse state to the channel being watched, one step per
+    // recomposition: kind, then country, then category filter. Each step is
+    // a state change that some remember(...) above re-derives from (a kind
+    // change rebuilds countryGroups and resets selectedCountry, a country
+    // change resets categoryFilter...), so the effect is keyed on all of
+    // them and simply re-evaluates what is still out of place every time
+    // one changes, rather than trying to set several at once.
+    var revealTarget by remember { mutableStateOf<Channel?>(null) }
+    LaunchedEffect(revealToken) {
+        if (revealToken > 0) revealTarget = revealChannel
+    }
+    LaunchedEffect(revealTarget, kind, myListActive, selectedCountry, categoryFilter, historySelected) {
+        val t = revealTarget ?: return@LaunchedEffect
+        val tCats = t.categories.ifEmpty { listOfNotNull(t.group) }
+        when {
+            myListActive -> myListActive = false
+            kind != t.kind -> kind = t.kind
+            selectedCountry?.key == RECENT_KEY || selectedCountry?.channels?.any { it.id == t.id } != true -> {
+                val g = countryGroups.firstOrNull { it.key != RECENT_KEY && it.channels.any { c -> c.id == t.id } }
+                if (g != null) selectedCountry = g
+                else {
+                    depth = Depth.CATEGORY; pendingFocus = Depth.CATEGORY
+                    revealTarget = null
+                }
+            }
+            historySelected -> historySelected = false
+            categoryFilter != null && categoryFilter !in tCats -> categoryFilter = null
+            else -> {
+                val idx = shown.indexOfFirst { it.id == t.id }
+                if (idx >= 0) {
+                    channelFocusId = t.id
+                    depth = Depth.CHANNELS
+                    runCatching { listState.scrollToItem(idx) }
+                    pendingFocus = Depth.CHANNELS
+                } else {
+                    depth = Depth.CATEGORY; pendingFocus = Depth.CATEGORY
+                }
+                // Last on purpose: clearing it restarts this effect, which
+                // would cancel the scroll above if it came first.
+                revealTarget = null
+            }
+        }
+    }
+
     @Composable
     fun channelListBody() {
         if (shown.isEmpty()) {
@@ -725,7 +797,8 @@ fun BrowseScreen(
                     channel = ch,
                     favorite = isFav,
                     pinned = isPinnedCh,
-                    modifier = if (i == 0) Modifier.focusRequester(firstChannelFocus) else Modifier,
+                    modifier = if (if (channelFocusId != null) ch.id == channelFocusId else i == 0)
+                        Modifier.focusRequester(firstChannelFocus) else Modifier,
                     onFocused = {
                         focusedChannel = ch
                         onSelectionChanged(ch.id)
@@ -798,7 +871,7 @@ fun BrowseScreen(
                         title = "All",
                         subtitle = "${myListChannels.size}",
                         selected = myListKindFilter == null,
-                        modifier = Modifier.focusRequester(firstCategoryFocus),
+                        modifier = if (myListKindFilter == null) Modifier.focusRequester(firstCategoryFocus) else Modifier,
                         // Promotes depth the same way every other branch of
                         // this function does (History/All/category rows
                         // below) when focus actually lands in this column -
@@ -813,9 +886,13 @@ fun BrowseScreen(
                         // myListKindFilter itself is set by onClick only now
                         // - see this function's own doc comment above.
                         onFocused = {
+                            myListKindFilter = null
                             if (depth == Depth.NAV) depth = Depth.CATEGORY
                         },
-                        onClick = { myListKindFilter = null },
+                        onClick = {
+                            myListKindFilter = null
+                            if (myListChannels.isNotEmpty()) { depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
+                        },
                         onLongPress = {},
                     )
                 }
@@ -824,10 +901,12 @@ fun BrowseScreen(
                         title = kindLabel(k),
                         subtitle = "$count",
                         selected = myListKindFilter == k,
+                        modifier = if (myListKindFilter == k) Modifier.focusRequester(firstCategoryFocus) else Modifier,
                         onFocused = {
+                            myListKindFilter = k
                             if (depth == Depth.NAV) depth = Depth.CATEGORY
                         },
-                        onClick = { myListKindFilter = k },
+                        onClick = { myListKindFilter = k; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS },
                         onLongPress = {},
                     )
                 }
@@ -849,11 +928,15 @@ fun BrowseScreen(
                         title = "History",
                         subtitle = "${recentChannels.size}",
                         selected = historySelected,
-                        modifier = Modifier.focusRequester(firstCategoryFocus),
+                        modifier = if (historySelected) Modifier.focusRequester(firstCategoryFocus) else Modifier,
                         onFocused = {
+                            historySelected = true; categoryFilter = null
                             if (depth == Depth.COUNTRY) depth = Depth.CATEGORY
                         },
-                        onClick = { historySelected = true; categoryFilter = null },
+                        onClick = {
+                            historySelected = true; categoryFilter = null
+                            depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
+                        },
                         onLongPress = {},
                     )
                 }
@@ -863,11 +946,15 @@ fun BrowseScreen(
                     title = "All",
                     subtitle = "${channelsInCountry.size}",
                     selected = !historySelected && categoryFilter == null,
-                    modifier = if (showHistory) Modifier else Modifier.focusRequester(firstCategoryFocus),
+                    modifier = if (!historySelected && categoryFilter == null) Modifier.focusRequester(firstCategoryFocus) else Modifier,
                     onFocused = {
+                        historySelected = false; categoryFilter = null
                         if (depth == Depth.COUNTRY) depth = Depth.CATEGORY
                     },
-                    onClick = { historySelected = false; categoryFilter = null },
+                    onClick = {
+                        historySelected = false; categoryFilter = null
+                        if (channelsInCountry.isNotEmpty()) { depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
+                    },
                     onLongPress = {},
                 )
             }
@@ -877,10 +964,15 @@ fun BrowseScreen(
                     title = if (isPinned) "[pin] ${entry.key}" else entry.key,
                     subtitle = "${entry.value}",
                     selected = !historySelected && categoryFilter == entry.key,
+                    modifier = if (!historySelected && categoryFilter == entry.key) Modifier.focusRequester(firstCategoryFocus) else Modifier,
                     onFocused = {
+                        historySelected = false; categoryFilter = entry.key
                         if (depth == Depth.COUNTRY) depth = Depth.CATEGORY
                     },
-                    onClick = { historySelected = false; categoryFilter = entry.key },
+                    onClick = {
+                        historySelected = false; categoryFilter = entry.key
+                        depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
+                    },
                     onLongPress = {
                         val category = entry.key
                         menu = {
@@ -1093,7 +1185,10 @@ fun BrowseScreen(
             val full = depth == Depth.CATEGORY || (depth == Depth.NAV && navPreview == NavPreview.MY_LIST)
             Column(
                 Modifier
-                    .then(if (full) Modifier.weight(1f) else Modifier.width(260.dp))
+                    .then(
+                        if (full) Modifier.weight(1f)
+                        else Modifier.width(if (miniPlayerActive) MiniPlayerWidth else 260.dp).padding(top = miniTop)
+                    )
                     .fillMaxHeight()
                     .then(leftArrowGoesBack)
             ) {
@@ -1104,7 +1199,7 @@ fun BrowseScreen(
                 }
                 categoryListBody()
             }
-            Spacer(Modifier.width(20.dp))
+            Spacer(Modifier.width(if (miniPlayerActive && !full) 0.dp else 20.dp))
         } else {
             Spacer(Modifier.width(categoryWidth))
         }
@@ -1117,7 +1212,10 @@ fun BrowseScreen(
             val full = depth == Depth.CHANNELS
             Column(
                 Modifier
-                    .then(if (full) Modifier.weight(1f) else Modifier.width(300.dp))
+                    .then(
+                        if (full) Modifier.weight(1f)
+                        else Modifier.width(300.dp).padding(top = miniTop)
+                    )
                     .fillMaxHeight()
                     .then(leftArrowGoesBack)
             ) {
@@ -1128,7 +1226,7 @@ fun BrowseScreen(
                 }
                 channelListBody()
             }
-            Spacer(Modifier.width(20.dp))
+            Spacer(Modifier.width(if (miniPlayerActive && !full) 0.dp else 20.dp))
         } else if (depth == Depth.GUIDE) {
             Spacer(Modifier.width(channelFullWidth))
         } else {
@@ -1151,6 +1249,7 @@ fun BrowseScreen(
             val guideModifier = Modifier
                 .then(if (depth == Depth.GUIDE) Modifier.weight(1f) else Modifier.width(guideWidth))
                 .fillMaxHeight()
+                .padding(top = miniTop)
                 .then(leftArrowGoesBack)
             if (focusedChannel?.kind == ContentKind.LIVE || focusedChannel == null) {
                 ProgrammePanel(
@@ -1181,6 +1280,13 @@ fun BrowseScreen(
                     modifier = guideModifier,
                 )
             }
+        }
+        // While the NAV column is open the columns to its right all stretch to
+        // fill the screen, so the corner picture needs its own strip held back
+        // for it there (every deeper depth already has a right-most column of
+        // its own to drop below the picture instead).
+        if (miniPlayerActive && depth == Depth.NAV && navPreview != NavPreview.NONE) {
+            Spacer(Modifier.width(MiniPlayerWidth))
         }
     }
 

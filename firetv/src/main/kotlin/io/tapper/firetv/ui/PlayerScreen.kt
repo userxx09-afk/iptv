@@ -72,6 +72,13 @@ fun PlayerScreen(
     // screen. Defaulted to empty (and falls back to `channels` below) so
     // on-demand playback, which never opens the guide anyway, needs nothing.
     allLiveChannels: List<Channel> = emptyList(),
+    // Corner-picture mode: the stream keeps playing (same player, same
+    // surface) but shrinks to MiniPlayerWidth x MiniPlayerHeight in the top-
+    // right, with every overlay hidden and no key/focus/Back handling, so the
+    // browse screen underneath works normally. Back from full screen enters
+    // this instead of stopping when onMinimize is supplied (live only).
+    minimized: Boolean = false,
+    onMinimize: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
@@ -180,8 +187,8 @@ fun PlayerScreen(
         player.play(channel, resumeAt(channel))
     }
 
-    LaunchedEffect(channel.id, status) {
-        if (status == null) { delay(4000); overlayVisible = false }
+    LaunchedEffect(channel.id, status, minimized) {
+        if (status == null && !minimized) { delay(4000); overlayVisible = false }
     }
 
     // Closes itself after a few seconds of no interaction, same as the
@@ -230,25 +237,36 @@ fun PlayerScreen(
     }
 
     DisposableEffect(Unit) { onDispose { player.release(); scope.cancel() } }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    // Re-run whenever full screen is re-entered from the corner picture: the
+    // root Box only becomes focusable again at that moment, and a Compose
+    // requestFocus on a node that has not attached yet throws, hence retries.
+    LaunchedEffect(minimized) {
+        if (minimized) return@LaunchedEffect
+        overlayVisible = true
+        repeat(5) {
+            if (runCatching { focus.requestFocus() }.isSuccess) return@LaunchedEffect
+            delay(16)
+        }
+    }
     // The controls closing (auto-hide or Back) removes whichever button was
     // focused from composition entirely, and Compose doesn't automatically
     // hand focus back to anything when that happens - without this the D-pad
     // would go dead until something is tapped, same failure BrowseScreen's
     // own nav-collapse comment already describes.
     LaunchedEffect(showControls) {
-        if (!showControls) runCatching { focus.requestFocus() }
+        if (!showControls && !minimized) runCatching { focus.requestFocus() }
     }
 
     // Closes the transport controls or an open guide overlay first, same as
     // any TV player - only a Back with nothing open actually leaves the
     // screen. Without this the very first thing anyone who opened the guide
     // would learn is that Back skips straight past it and quits playback.
-    BackHandler {
+    // Disabled in the corner-picture mode so Back reaches the browse screen.
+    BackHandler(enabled = !minimized) {
         when {
             showControls -> showControls = false
             overlayLevel != 0 -> overlayLevel = 0
-            else -> onExit()
+            else -> if (onMinimize != null) onMinimize() else onExit()
         }
     }
 
@@ -313,10 +331,11 @@ fun PlayerScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Backdrop)
+            .background(if (minimized) Color.Transparent else Backdrop)
             .focusRequester(focus)
-            .focusable()
+            .focusable(enabled = !minimized)
             .onKeyEvent { e ->
+                if (minimized) return@onKeyEvent false
                 if (e.type != KeyEventType.KeyUp) return@onKeyEvent false
                 // Once the controls are open, they and their own children own
                 // every key - this handler backing off is what lets D-pad
@@ -388,6 +407,11 @@ fun PlayerScreen(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     useController = false
+                    // Never a D-pad target itself: keys belong to the Box
+                    // above in full screen and to the browse screen in the
+                    // corner picture.
+                    isFocusable = false
+                    descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -399,14 +423,22 @@ fun PlayerScreen(
             // the category sidebar and channel list have room - everything
             // else (including the compact guide) keeps the picture full
             // screen behind it.
-            modifier = if (overlayLevel == 2)
+            modifier = if (minimized)
+                // Same insets BrowseScreen's Row uses (27.dp top, 48.dp
+                // sides) so the picture sits exactly above its right column.
+                Modifier.padding(top = 27.dp, end = 48.dp)
+                    .size(MiniPlayerWidth, MiniPlayerHeight).align(Alignment.TopEnd)
+                    .clip(RoundedCornerShape(10.dp))
+            else if (overlayLevel == 2)
                 Modifier.padding(24.dp).size(360.dp, 203.dp).align(Alignment.TopEnd)
                     .clip(RoundedCornerShape(10.dp))
             else Modifier.fillMaxSize(),
         )
 
         val msg = status
-        if (msg != null) {
+        if (minimized) {
+            // Corner picture: nothing drawn over it.
+        } else if (msg != null) {
             Column(
                 Modifier.align(Alignment.Center).padding(48.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -452,7 +484,9 @@ fun PlayerScreen(
             )
         }
 
-        if (overlayLevel == 1) {
+        if (minimized) {
+            // no guide overlays in the corner picture
+        } else if (overlayLevel == 1) {
             GuideOverlay(
                 channels = compactGuideChannels,
                 previewChannelId = previewChannelId,
