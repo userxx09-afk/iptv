@@ -30,6 +30,24 @@ class FavoritesStore(context: Context) {
         return added
     }
 
+    /** Channels (or shows/movies) pinned to the top of whichever list they
+     *  appear in. Same "sourceId|channelId" key as favourites, and like them
+     *  deliberately not tied to a category or country - a pinned channel
+     *  floats to the top of its category list, its country's "All" list and
+     *  My List alike, which is where someone who pins it expects to find it. */
+    fun pinnedChannels(): Set<String> = prefs.getStringSet("pinned_channels", emptySet()) ?: emptySet()
+
+    fun isPinnedChannel(sourceId: String, channelId: String) = key(sourceId, channelId) in pinnedChannels()
+
+    fun togglePinnedChannel(sourceId: String, channelId: String): Boolean {
+        val k = key(sourceId, channelId)
+        val next = pinnedChannels().toMutableSet()
+        val added = if (k in next) { next.remove(k); false } else { next.add(k); true }
+        // New Set instance for the same reason as toggle() above.
+        prefs.edit().putStringSet("pinned_channels", HashSet(next)).apply()
+        return added
+    }
+
     fun pinnedCountries(): Set<String> = prefs.getStringSet("pinned", emptySet()) ?: emptySet()
 
     fun togglePinned(code: String): Boolean {
