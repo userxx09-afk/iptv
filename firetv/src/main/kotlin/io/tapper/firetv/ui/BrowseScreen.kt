@@ -1302,9 +1302,17 @@ private fun ChannelRow(
             // like "US[Global Sports]|PGA Tour Main Camera Global Cast
             // (2026-08-13:09:00:20)" previously just vanished past the
             // ellipsis with no way to read the rest without opening it.
+            //
+            // basicMarquee() by default scrolls only 3 times and then goes
+            // still, which is easy to miss and then reads as "not scrolling".
+            // On a list of near-identical names ("NFL | 02 - 9:30am ...",
+            // "NFL | 03 - 1pm ...") the part that tells them apart is the end,
+            // so the focused row keeps scrolling for as long as it's focused.
             Text(channel.name, style = MaterialTheme.typography.bodyLarge, color = Ink,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = if (focused) Modifier.basicMarquee() else Modifier)
+                modifier = if (focused) Modifier.basicMarquee(
+                    iterations = Int.MAX_VALUE, initialDelayMillis = 600, repeatDelayMillis = 1000,
+                ) else Modifier)
             // Guide line when it exists, otherwise the category - never blank,
             // so rows keep a consistent height whether or not EPG has loaded.
             Text(
@@ -1312,7 +1320,9 @@ private fun ChannelRow(
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (programme != null) Focus else Dim,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = if (focused) Modifier.basicMarquee() else Modifier,
+                modifier = if (focused) Modifier.basicMarquee(
+                    iterations = Int.MAX_VALUE, initialDelayMillis = 600, repeatDelayMillis = 1000,
+                ) else Modifier,
             )
         }
         if (favorite) {
