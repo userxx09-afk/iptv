@@ -11,6 +11,7 @@ import io.tapper.core.model.CategoryName
 import io.tapper.core.model.Channel
 import io.tapper.core.model.ContentKind
 import io.tapper.core.model.StreamRef
+import io.tapper.core.model.isDecorativeSectionLabel
 import io.tapper.core.net.tapperHttpClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -164,6 +165,12 @@ class XtreamClient(
             val o = el as? JsonObject ?: return@forEachIndexed
             val id = o.str("stream_id") ?: return@forEachIndexed
             val name = o.str("name")?.trim() ?: return@forEachIndexed
+            // A pure section-divider entry ("##### ENTERTAINMENT #####"),
+            // not a real channel - see isDecorativeSectionLabel's doc.
+            // Skipped here rather than filtered later in the UI, so it never
+            // gets counted, numbered, or focused as if it were a real
+            // stream anywhere downstream.
+            if (isDecorativeSectionLabel(name)) return@forEachIndexed
             val parsed = CategoryName.parse(o.categoryKey()?.let { cats[it] })
             out.add(
                 Channel(
@@ -197,6 +204,7 @@ class XtreamClient(
             val o = el as? JsonObject ?: continue
             val id = o.str("stream_id") ?: continue
             val name = o.str("name")?.trim() ?: continue
+            if (isDecorativeSectionLabel(name)) continue
             val parsed = CategoryName.parse(o.categoryKey()?.let { cats[it] })
             val ext = o.str("container_extension") ?: "mp4"
             out.add(
@@ -231,6 +239,7 @@ class XtreamClient(
             val o = el as? JsonObject ?: continue
             val id = o.str("series_id") ?: continue
             val name = o.str("name")?.trim() ?: continue
+            if (isDecorativeSectionLabel(name)) continue
             val parsed = CategoryName.parse(o.categoryKey()?.let { cats[it] })
             out.add(
                 Channel(
