@@ -1303,16 +1303,20 @@ private fun ChannelRow(
             // (2026-08-13:09:00:20)" previously just vanished past the
             // ellipsis with no way to read the rest without opening it.
             //
-            // basicMarquee() by default scrolls only 3 times and then goes
-            // still, which is easy to miss and then reads as "not scrolling".
-            // On a list of near-identical names ("NFL | 02 - 9:30am ...",
-            // "NFL | 03 - 1pm ...") the part that tells them apart is the end,
-            // so the focused row keeps scrolling for as long as it's focused.
+            // Scrolls on every row that's on screen, focused or not - this
+            // list is also shown as a narrow preview beside the category
+            // rail, where nothing in it has focus, and on a list of near-
+            // identical names ("NFL | 02 - 9:30am ...", "NFL | 03 - 1pm ...")
+            // the part that tells them apart is the end. A LazyColumn only
+            // composes rows that are visible (plus a couple of spare), so
+            // this is a handful of marquees at once, not one per channel; and
+            // a name that already fits doesn't animate at all. Runs forever
+            // (basicMarquee's default stops after 3 passes).
             Text(channel.name, style = MaterialTheme.typography.bodyLarge, color = Ink,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = if (focused) Modifier.basicMarquee(
-                    iterations = Int.MAX_VALUE, initialDelayMillis = 600, repeatDelayMillis = 1000,
-                ) else Modifier)
+                modifier = Modifier.basicMarquee(
+                    iterations = Int.MAX_VALUE, initialDelayMillis = 800, repeatDelayMillis = 1500,
+                ))
             // Guide line when it exists, otherwise the category - never blank,
             // so rows keep a consistent height whether or not EPG has loaded.
             Text(
@@ -1320,9 +1324,9 @@ private fun ChannelRow(
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (programme != null) Focus else Dim,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = if (focused) Modifier.basicMarquee(
-                    iterations = Int.MAX_VALUE, initialDelayMillis = 600, repeatDelayMillis = 1000,
-                ) else Modifier,
+                modifier = Modifier.basicMarquee(
+                    iterations = Int.MAX_VALUE, initialDelayMillis = 800, repeatDelayMillis = 1500,
+                ),
             )
         }
         if (favorite) {
