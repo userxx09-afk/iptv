@@ -539,17 +539,28 @@ fun BrowseScreen(
     // Home if one is configured (jump straight to the channel list - country
     // and category are both already pinned down by selectedCountry's and
     // categoryFilter's own remember blocks above, which read navHome
-    // themselves); otherwise the category rail directly for a kind with no
-    // real per-country split (skipping the empty COUNTRY column); otherwise
-    // the channel list, with the country rail one LEFT-arrow away for anyone
-    // who wants a different one.
+    // themselves); otherwise the category rail, always - a kind with no real
+    // per-country split lands there because there's nowhere else for it to
+    // go (the empty COUNTRY column is skipped); a kind that DOES have real
+    // countries (Live TV) now lands there too, rather than skipping past it
+    // straight into a flat, unfiltered channel list for whatever country was
+    // guessed as the default. That used to be the behaviour here (the third
+    // branch below went straight to Depth.CHANNELS), on the reasoning that
+    // most viewers don't want to re-pick a country every time - true, and
+    // selectedCountry's own default (preferredCountry) still saves them that
+    // - but it also meant skipping the categories entirely on every single
+    // visit, even for an account like this one with dozens of them, which
+    // read as the screen refusing to show what categories existed at all.
+    // The country rail is still one LEFT-arrow away from here (goBack()
+    // below sends CATEGORY -> COUNTRY whenever hasRealCountries(kind) is
+    // true), so nothing about picking a different country got harder - only
+    // the default landing spot changed.
     fun enterKind(k: ContentKind) {
         myListActive = false
         kind = k
         when {
             navHome.get(k) != null -> { depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
-            !hasRealCountries(k) -> { depth = Depth.CATEGORY; pendingFocus = Depth.CATEGORY }
-            else -> { depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
+            else -> { depth = Depth.CATEGORY; pendingFocus = Depth.CATEGORY }
         }
     }
 
