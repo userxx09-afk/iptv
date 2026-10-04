@@ -1,37 +1,60 @@
-package io.tapper.core.xtream
+package io.tapper.core.xtream.multiplatform
 
-import android.util.JsonReader
-import android.util.JsonToken
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.encodeURLParameter
+import io.ktor.http.isSuccess
 import io.tapper.core.model.CategoryName
 import io.tapper.core.model.Channel
 import io.tapper.core.model.ContentKind
 import io.tapper.core.model.StreamRef
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStream
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
+import io.tapper.core.model.isDecorativeSectionLabel
+import io.tapper.core.net.tapperHttpClient
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
- * Xtream Codes panel client. Uses HttpURLConnection and org.json/android.util
- * JsonReader — both are in the platform, so this adds no dependencies.
+ * Xtream Codes panel client - the commonMain/Ktor counterpart to Fire TV's
+ * original androidMain version (HttpURLConnection + org.json/android.util
+ * JsonReader, both Android-only). Ported for live channels, movies, series
+ * and episodes, matching that version's behaviour and field-leniency rules.
  *
- * Panels are inconsistent in ways that matter: numeric fields arrive as JSON
- * numbers on one endpoint and quoted strings on the next, and a rejected login
- * is commonly an HTML page served with HTTP 200. Everything here assumes that.
+ * Two deliberate differences from the Fire TV original, both worth knowing
+ * about rather than discovering by surprise:
  *
- * The three catalogue endpoints (get_live_streams, get_vod_streams, get_series)
- * are read with a streaming parser rather than org.json. One account's
- * get_series response measured over 100MB - slurping that into a single
- * String and then building a full org.json tree on top of it is two
- * simultaneous in-memory copies of a 100MB+ document, on a device (Fire TV
- * Stick) with a fraction of a phone's heap. That is what an
- * OutOfMemoryError on "Couldn't load shows" turned out to be. The account
- * endpoint and category lists stay on the simple slurp-a-String path below
- * (fetch/JSONArray) since those responses are small.
+ * 1. Not streaming. The Fire TV version reads get_live_streams/
+ *    get_vod_streams/get_series with a hand-rolled streaming JsonReader
+ *    specifically because one real account's get_series response measured
+ *    over 100MB, and slurping that into one String plus a full JSON tree on
+ *    top of it is two simultaneous in-memory copies of a 100MB+ document - on
+ *    a Fire TV Stick, that is what an OutOfMemoryError on "Couldn't load
+ *    shows" turned out to be. kotlinx.serialization's multiplatform streaming
+ *    story (decodeToSequence) is JVM/InputStream-only, not available on
+ *    iOS/Native, so this version uses the same whole-body-then-JsonElement-
+ *    tree approach [TmdbClient] uses instead. An iPad has far more memory
+ *    headroom than a Fire TV Stick, so this is a reasonable trade for now -
+ *    but a 100MB+ catalogue on this path is still a real risk worth
+ *    revisiting with a genuine multiplatform streaming parser if it turns
+ *    out to matter in practice.
+ *
+ * 2. Simpler network-error messages. The original distinguishes DNS
+ *    failures, timeouts, refused connections and TLS problems using
+ *    java.net/javax.net.ssl exception types that only exist on the JVM.
+ *    Those don't exist on Kotlin/Native, and there's no compiler available
+ *    in this sandbox to verify which Darwin-side exception types Ktor
+ *    actually surfaces for each case - so this version reports one generic
+ *    "couldn't reach the server" message with whatever detail the
+ *    underlying exception provides, rather than guessing at a platform-
+ *    specific exception hierarchy that can't be checked. Worth tightening
+ *    once this has run against real failures on a device.
  */
 class XtreamClient(
     private val host: String,
@@ -52,8 +75,6 @@ class XtreamClient(
             // Strip only the known API entry points a provider might have
             // appended. A blanket strip to scheme+host+port would break panels
             // genuinely hosted under a path prefix, which do exist.
-            // Query string first: "/get.php?username=..." only ends with the
-            // known suffix once the query has been removed.
             var r = raw.substringBefore('?').trimEnd('/')
             for (suffix in listOf("/player_api.php", "/panel_api.php", "/get.php", "/xmltv.php", "/c", "/index.php")) {
                 if (r.endsWith(suffix, ignoreCase = true)) { r = r.dropLast(suffix.length); break }
@@ -61,7 +82,12 @@ class XtreamClient(
             r.trimEnd('/')
         }
 
-    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+    // spaceToPlus=true matches java.net.URLEncoder.encode()'s behaviour,
+    // which the Fire TV original used verbatim for this same enc() helper -
+    // keeping the same encoding here (even in the liveUrl/vodUrl/episodeUrl
+    // path segments below, not just the query string) means a username or
+    // password already in use on Fire TV encodes identically on iPad.
+    private fun enc(s: String) = s.encodeURLParameter(spaceToPlus = true)
 
     private fun api(action: String?) = buildString {
         append("$base/player_api.php?username=${enc(username)}&password=${enc(password)}")
@@ -80,287 +106,295 @@ class XtreamClient(
     fun episodeUrl(episodeId: String, ext: String) =
         "$base/series/${enc(username)}/${enc(password)}/$episodeId.$ext"
 
-    /**
-     * HttpURLConnection refuses cross-protocol redirects: an http:// panel that
-     * 301s to https:// returns the redirect itself rather than following it.
-     * Several panels do exactly that, so redirects are followed by hand.
-     *
-     * Returns the live response stream rather than a slurped String - the
-     * caller decides whether this response is small enough to read in one go
-     * ([fetch]) or large enough that it needs to be streamed and never fully
-     * materialised ([liveChannels], [movies], [series]).
-     */
-    private fun open(url: String, hop: Int = 0): InputStream {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 60_000
-            instanceFollowRedirects = false
-            setRequestProperty("User-Agent", "TapperIPTV/0.5")
-        }
-        val code = try {
-            conn.responseCode
-        } catch (t: Throwable) {
-            throw XtreamException(describe(t, url), t)
-        }
-
-        if (code in 300..399) {
-            val location = conn.getHeaderField("Location")
-                ?: throw XtreamException("Server sent a redirect with no address (HTTP $code).")
-            if (hop >= 4) throw XtreamException("Too many redirects from this server.")
-            conn.disconnect()
-            return open(URL(URL(url), location).toString(), hop + 1)
-        }
-
-        if (code !in 200..299) {
-            conn.disconnect()
-            throw XtreamException(
-                when (code) {
-                    401, 403 -> "Server refused the request (HTTP $code). Check the username and password."
-                    404 -> "Server has no Xtream API at this address (HTTP 404). Check the port and path."
-                    else -> "Server returned HTTP $code."
-                }
-            )
-        }
-        return conn.inputStream
-    }
-
-    /** Small, bounded responses - account info, category lists - where
-     *  reading the whole body into one String is fine. */
-    private fun fetch(url: String): String =
-        try {
-            open(url).use { it.bufferedReader().readText() }
-        } catch (e: XtreamException) {
-            throw e
-        } catch (t: Throwable) {
-            throw XtreamException(describe(t, url), t)
-        }
-
-    /**
-     * Turns the underlying failure into something actionable. The previous
-     * version reported "Couldn't reach <host>" for every possible cause, which
-     * made a DNS typo, a wrong port, a TLS problem and a dead server all look
-     * identical.
-     */
-    private fun describe(t: Throwable, url: String): String {
-        val host = runCatching { URL(url).host }.getOrNull() ?: "the server"
-        val port = runCatching { URL(url).port }.getOrNull() ?: -1
-        val where = if (port > 0) "$host:$port" else host
-        return when (t) {
-            is java.net.UnknownHostException ->
-                "Can't find $host. Check the address for typos, or that this device has a working connection."
-            is java.net.SocketTimeoutException ->
-                "$where didn't respond in time. The port may be wrong, or the server may be blocking this network."
-            is java.net.ConnectException ->
-                "$where refused the connection. This usually means the wrong port."
-            is javax.net.ssl.SSLHandshakeException ->
-                "$where has an HTTPS certificate this device rejects. Try http:// instead of https://."
-            is javax.net.ssl.SSLException ->
-                "Secure connection to $where failed. Try http:// instead of https://."
-            else ->
-                "Couldn't reach $where (" + (t::class.simpleName ?: "error") +
-                    (t.message?.let { ": " + it.take(90) } ?: "") + ")"
+    private companion object {
+        // Shared, long-lived client - see TmdbClient's companion object doc
+        // for why this must not be constructed fresh per instance/call.
+        val http = tapperHttpClient().config {
+            expectSuccess = false
+            install(HttpTimeout) {
+                connectTimeoutMillis = 15_000
+                // Catalogue endpoints can be large and slow on an overloaded
+                // panel - matches the Fire TV original's 60s read timeout.
+                socketTimeoutMillis = 60_000
+            }
         }
     }
 
     /**
-     * Validates the account and returns what the panel says about it. Surfacing
-     * this is worth the extra call — "your subscription expired" is the single
-     * most common cause of an app that looks broken.
+     * Validates the account and returns what the panel says about it.
+     * Surfacing this is worth the extra call - "your subscription expired"
+     * is the single most common cause of an app that looks broken.
      */
-    fun authenticate(): XtreamAccount {
+    suspend fun authenticate(): XtreamAccount {
         val body = fetch(api(null))
         if (body.trimStart().startsWith("<")) {
             throw XtreamException("The server returned a web page, not account data. Check the host address.")
         }
-        val root = try { JSONObject(body) } catch (t: Throwable) {
-            throw XtreamException("Unexpected response from the server.", t)
-        }
-        val info = root.optJSONObject("user_info")
+        val root = parseObject(body)
+        val info = root["user_info"] as? JsonObject
             ?: throw XtreamException("No account information returned.")
 
-        if (info.lenientInt("auth") == 0) throw XtreamException("Username or password rejected.")
+        if (info.int("auth") == 0) throw XtreamException("Username or password rejected.")
 
         return XtreamAccount(
-            username = info.lenientString("username") ?: username,
-            status = info.lenientString("status") ?: "Unknown",
-            expiresUtc = info.lenientLong("exp_date")?.takeIf { it > 0 }?.times(1000L),
-            maxConnections = info.lenientInt("max_connections") ?: 1,
-            activeConnections = info.lenientInt("active_cons") ?: 0,
-            trial = info.lenientInt("is_trial") == 1,
+            username = info.str("username") ?: username,
+            status = info.str("status") ?: "Unknown",
+            expiresUtc = info.long("exp_date")?.takeIf { it > 0 }?.times(1000L),
+            maxConnections = info.int("max_connections") ?: 1,
+            activeConnections = info.int("active_cons") ?: 0,
+            trial = info.int("is_trial") == 1,
         )
     }
 
-    fun liveChannels(
+    /**
+     * [onWarning] fires (rather than throws) if fetching category names
+     * fails - the stream list itself still comes back and is still usable,
+     * just with every item falling into a single fallback group instead of
+     * the panel's real category/country breakdown.
+     */
+    suspend fun liveChannels(
         sourceId: String,
         preferHls: Boolean = false,
-        /** Fired (not thrown) if fetching category names fails - the stream
-         *  list itself still comes back and is still usable, just with every
-         *  item falling into a single fallback group instead of the panel's
-         *  real category/country breakdown. Silently swallowing this used to
-         *  make that look identical to an account that genuinely has no
-         *  categorisation, with no way to tell the two apart. */
         onWarning: (String) -> Unit = {},
     ): List<Channel> {
-        val cats = runCatching { categoryNames() }
-            .onFailure { onWarning("Couldn't load live categories: ${it.message}") }
-            .getOrDefault(emptyMap())
+        val cats = loadCategories("get_live_categories", onWarning, "live categories")
         val ext = if (preferHls) "m3u8" else "ts"
-        val out = ArrayList<Channel>()
-        var i = 0
-        open(api("get_live_streams")).use { input ->
-            streamArray(input) { o ->
-                val id = o["stream_id"] ?: return@streamArray
-                val name = o["name"]?.trim() ?: return@streamArray
-                val parsed = CategoryName.parse((o["category_id"] ?: o["category_ids"])?.let { cats[it] })
-                out.add(
-                    Channel(
-                        id = id,
-                        sourceId = sourceId,
-                        name = name,
-                        number = o["num"]?.toIntOrNull() ?: (i + 1),
-                        logoUrl = o["stream_icon"]?.takeIf { it.isNotBlank() },
-                        // Xtream has no country field of its own. Providers encode it
-                        // in the category name ("US | Sports"), which is the only place
-                        // the information exists - splitting it gives both axes.
-                        group = parsed.category,
-                        countryCode = parsed.countryCode,
-                        epgChannelId = o["epg_channel_id"]?.takeIf { it.isNotBlank() },
-                        streams = listOf(StreamRef(liveUrl(id, ext), 0)),
-                        kind = ContentKind.LIVE,
-                        categories = listOfNotNull(parsed.category),
-                    )
+        val arr = parseArray(fetch(api("get_live_streams")))
+        val out = ArrayList<Channel>(arr.size)
+        arr.forEachIndexed { i, el ->
+            val o = el as? JsonObject ?: return@forEachIndexed
+            val id = o.str("stream_id") ?: return@forEachIndexed
+            val name = o.str("name")?.trim() ?: return@forEachIndexed
+            // A pure section-divider entry ("##### ENTERTAINMENT #####"),
+            // not a real channel - see isDecorativeSectionLabel's doc.
+            // Skipped here rather than filtered later in the UI, so it never
+            // gets counted, numbered, or focused as if it were a real
+            // stream anywhere downstream.
+            if (isDecorativeSectionLabel(name)) return@forEachIndexed
+            val parsed = CategoryName.parse(o.categoryKey()?.let { cats[it] })
+            out.add(
+                Channel(
+                    id = id,
+                    sourceId = sourceId,
+                    name = name,
+                    number = o.int("num") ?: (i + 1),
+                    logoUrl = o.str("stream_icon")?.takeIf { it.isNotBlank() },
+                    group = parsed.category,
+                    countryCode = parsed.countryCode,
+                    epgChannelId = o.str("epg_channel_id")?.takeIf { it.isNotBlank() },
+                    streams = listOf(StreamRef(liveUrl(id, ext), 0)),
+                    kind = ContentKind.LIVE,
+                    categories = listOfNotNull(parsed.category),
                 )
-                i++
-            }
+            )
         }
         return out
     }
 
     /**
-     * Films. Same panel, different endpoint - no extra dependency, and the
-     * container extension the panel reports must be used verbatim: guessing
-     * .mp4 for an .mkv gives a 404 on most panels.
-     *
-     * See [liveChannels]'s [onWarning] doc - same deal here: a failed
-     * get_vod_categories call still returns every movie, just uncategorised.
+     * Films. Same panel, different endpoint. The container extension the
+     * panel reports is used verbatim - guessing .mp4 for an .mkv gives a
+     * 404 on most panels.
      */
-    fun movies(sourceId: String, onWarning: (String) -> Unit = {}): List<Channel> {
-        val cats = runCatching { categoryNames("get_vod_categories") }
-            .onFailure { onWarning("Couldn't load movie categories: ${it.message}") }
-            .getOrDefault(emptyMap())
-        val out = ArrayList<Channel>()
-        open(api("get_vod_streams")).use { input ->
-            streamArray(input) { o ->
-                val id = o["stream_id"] ?: return@streamArray
-                val name = o["name"]?.trim() ?: return@streamArray
-                val parsed = CategoryName.parse((o["category_id"] ?: o["category_ids"])?.let { cats[it] })
-                val ext = o["container_extension"] ?: "mp4"
-                out.add(
-                    Channel(
-                        id = "vod-" + id,
-                        sourceId = sourceId,
-                        name = name,
-                        number = null,
-                        logoUrl = o["stream_icon"]?.takeIf { it.isNotBlank() },
-                        group = parsed.category,
-                        countryCode = parsed.countryCode,
-                        epgChannelId = null,
-                        streams = listOf(StreamRef(vodUrl(id, ext), 0)),
-                        kind = ContentKind.MOVIE,
-                        categories = listOfNotNull(parsed.category),
-                    )
+    suspend fun movies(sourceId: String, onWarning: (String) -> Unit = {}): List<Channel> {
+        val cats = loadCategories("get_vod_categories", onWarning, "movie categories")
+        val arr = parseArray(fetch(api("get_vod_streams")))
+        val out = ArrayList<Channel>(arr.size)
+        for (el in arr) {
+            val o = el as? JsonObject ?: continue
+            val id = o.str("stream_id") ?: continue
+            val name = o.str("name")?.trim() ?: continue
+            if (isDecorativeSectionLabel(name)) continue
+            val parsed = CategoryName.parse(o.categoryKey()?.let { cats[it] })
+            val ext = o.str("container_extension") ?: "mp4"
+            out.add(
+                Channel(
+                    id = "vod-$id",
+                    sourceId = sourceId,
+                    name = name,
+                    number = null,
+                    logoUrl = o.str("stream_icon")?.takeIf { it.isNotBlank() },
+                    group = parsed.category,
+                    countryCode = parsed.countryCode,
+                    epgChannelId = null,
+                    streams = listOf(StreamRef(vodUrl(id, ext), 0)),
+                    kind = ContentKind.MOVIE,
+                    categories = listOfNotNull(parsed.category),
                 )
-            }
+            )
         }
         return out
     }
 
     /**
      * Series listings. These carry no stream of their own - episodes are
-     * fetched per series, because a panel with thousands of series would
-     * otherwise need thousands of calls up front. See [liveChannels]'s
-     * [onWarning] doc.
+     * fetched per series via [episodes], because a panel with thousands of
+     * series would otherwise need thousands of calls up front.
      */
-    fun series(sourceId: String, onWarning: (String) -> Unit = {}): List<Channel> {
-        val cats = runCatching { categoryNames("get_series_categories") }
-            .onFailure { onWarning("Couldn't load show categories: ${it.message}") }
-            .getOrDefault(emptyMap())
-        val out = ArrayList<Channel>()
-        open(api("get_series")).use { input ->
-            streamArray(input) { o ->
-                val id = o["series_id"] ?: return@streamArray
-                val name = o["name"]?.trim() ?: return@streamArray
-                val parsed = CategoryName.parse((o["category_id"] ?: o["category_ids"])?.let { cats[it] })
-                out.add(
-                    Channel(
-                        id = "series-" + id,
-                        sourceId = sourceId,
-                        name = name,
-                        number = null,
-                        logoUrl = o["cover"]?.takeIf { it.isNotBlank() },
-                        group = parsed.category,
-                        countryCode = parsed.countryCode,
-                        epgChannelId = null,
-                        streams = emptyList(),
-                        kind = ContentKind.SERIES,
-                        categories = listOfNotNull(parsed.category),
-                        seriesId = id,
-                    )
+    suspend fun series(sourceId: String, onWarning: (String) -> Unit = {}): List<Channel> {
+        val cats = loadCategories("get_series_categories", onWarning, "show categories")
+        val arr = parseArray(fetch(api("get_series")))
+        val out = ArrayList<Channel>(arr.size)
+        for (el in arr) {
+            val o = el as? JsonObject ?: continue
+            val id = o.str("series_id") ?: continue
+            val name = o.str("name")?.trim() ?: continue
+            if (isDecorativeSectionLabel(name)) continue
+            val parsed = CategoryName.parse(o.categoryKey()?.let { cats[it] })
+            out.add(
+                Channel(
+                    id = "series-$id",
+                    sourceId = sourceId,
+                    name = name,
+                    number = null,
+                    logoUrl = o.str("cover")?.takeIf { it.isNotBlank() },
+                    group = parsed.category,
+                    countryCode = parsed.countryCode,
+                    epgChannelId = null,
+                    streams = emptyList(),
+                    kind = ContentKind.SERIES,
+                    categories = listOfNotNull(parsed.category),
+                    seriesId = id,
                 )
-            }
+            )
         }
         return out
     }
 
     /** Episodes for one series, flattened across seasons and sorted. */
-    fun episodes(sourceId: String, seriesId: String): List<Channel> {
-        val root = JSONObject(fetch(api("get_series_info") + "&series_id=" + enc(seriesId)))
-        val seasons = root.optJSONObject("episodes") ?: return emptyList()
-        val out = ArrayList<Triple<Int, Int, Channel>>()
-        val keys = seasons.keys()
-        while (keys.hasNext()) {
-            val seasonKey = keys.next()
-            val arr = seasons.optJSONArray(seasonKey) ?: continue
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
-                val epId = o.lenientString("id") ?: continue
-                val season = seasonKey.toIntOrNull() ?: o.lenientInt("season") ?: 0
-                val number = o.lenientInt("episode_num") ?: (i + 1)
-                val ext = o.lenientString("container_extension") ?: "mp4"
-                val title = o.lenientString("title")?.trim().orEmpty()
-                    .ifEmpty { "Episode " + number }
+    suspend fun episodes(sourceId: String, seriesId: String): List<Channel> {
+        val body = fetch(api("get_series_info") + "&series_id=" + enc(seriesId))
+        val root = parseObject(body)
+        val seasons = root["episodes"] as? JsonObject ?: return emptyList()
+
+        data class Ordered(val season: Int, val number: Int, val channel: Channel)
+        val out = ArrayList<Ordered>()
+        for ((seasonKey, value) in seasons) {
+            val arr = value as? JsonArray ?: continue
+            arr.forEachIndexed { i, el ->
+                val o = el as? JsonObject ?: return@forEachIndexed
+                val epId = o.str("id") ?: return@forEachIndexed
+                val season = seasonKey.toIntOrNull() ?: o.int("season") ?: 0
+                val number = o.int("episode_num") ?: (i + 1)
+                val ext = o.str("container_extension") ?: "mp4"
+                val title = o.str("title")?.trim().orEmpty().ifEmpty { "Episode $number" }
+                val image = (o["info"] as? JsonObject)?.str("movie_image")
                 out.add(
-                    Triple(
+                    Ordered(
                         season, number,
                         Channel(
-                            id = "ep-" + epId,
+                            id = "ep-$epId",
                             sourceId = sourceId,
-                            name = "S" + season + "E" + number + "  " + title,
+                            name = "S${season}E$number  $title",
                             number = number,
-                            logoUrl = o.optJSONObject("info")?.lenientString("movie_image"),
-                            group = "Season " + season,
+                            logoUrl = image,
+                            group = "Season $season",
                             countryCode = null,
                             epgChannelId = null,
                             streams = listOf(StreamRef(episodeUrl(epId, ext), 0)),
                             kind = ContentKind.MOVIE,
-                            categories = listOf("Season " + season),
+                            categories = listOf("Season $season"),
                         )
                     )
                 )
             }
         }
-        return out.sortedWith(compareBy({ it.first }, { it.second })).map { it.third }
+        return out.sortedWith(compareBy({ it.season }, { it.number })).map { it.channel }
     }
 
-    private fun categoryNames(action: String = "get_live_categories"): Map<String, String> {
-        val arr = JSONArray(fetch(api(action)))
-        val map = HashMap<String, String>(arr.length())
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            val id = o.lenientString("category_id") ?: continue
-            map[id] = o.lenientString("category_name") ?: "Unnamed"
+    private suspend fun loadCategories(
+        action: String,
+        onWarning: (String) -> Unit,
+        label: String,
+    ): Map<String, String> =
+        try {
+            val arr = parseArray(fetch(api(action)))
+            val map = HashMap<String, String>(arr.size)
+            for (el in arr) {
+                val o = el as? JsonObject ?: continue
+                val id = o.str("category_id") ?: continue
+                map[id] = o.str("category_name") ?: "Unnamed"
+            }
+            map
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            onWarning("Couldn't load $label: ${t.message}")
+            emptyMap()
         }
-        return map
+
+    private fun parseArray(body: String): JsonArray {
+        if (body.trimStart().startsWith("<")) {
+            throw XtreamException("The server returned a web page, not data. Check the host address.")
+        }
+        return try {
+            Json.parseToJsonElement(body) as? JsonArray
+                ?: throw XtreamException("Unexpected response from the server.")
+        } catch (e: XtreamException) {
+            throw e
+        } catch (t: Throwable) {
+            throw XtreamException("Unexpected response from the server.", t)
+        }
+    }
+
+    private fun parseObject(body: String): JsonObject =
+        try {
+            Json.parseToJsonElement(body) as? JsonObject
+                ?: throw XtreamException("Unexpected response from the server.")
+        } catch (e: XtreamException) {
+            throw e
+        } catch (t: Throwable) {
+            throw XtreamException("Unexpected response from the server.", t)
+        }
+
+    // Up to 3 attempts: the real request plus 2 short-delayed retries,
+    // bounded so a genuinely dead panel still fails in under ~1.5s of extra
+    // wait rather than hanging.
+    //
+    // Why this exists at all: OkHttp (Android/Fire TV's engine) retries a
+    // GET by default when it picks a pooled keep-alive connection that the
+    // server already closed - the caller never sees it. Ktor's Darwin engine
+    // (iOS, via NSURLSession) has no such built-in retry; the exact same
+    // situation surfaces straight to this code as
+    // NSURLErrorNetworkConnectionLost (-1005), "The network connection was
+    // lost." Apple's own guidance on this error (Technical Q&A QA1941) is
+    // that it's expected to happen periodically against real servers and
+    // that idempotent requests - a plain GET, like every call this client
+    // makes - should simply be retried rather than treated as a hard
+    // failure. This closes that iOS-specific gap without needing anything
+    // Darwin-specific here in commonMain: any transport-level failure gets
+    // the same short retry, on both platforms, since it's cheap and safe
+    // either way.
+    private suspend fun fetch(url: String): String {
+        var lastError: Throwable? = null
+        repeat(3) { attempt ->
+            val response: HttpResponse = try {
+                http.get(url) { header("User-Agent", "TapperIPTV/0.5") }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                lastError = t
+                if (attempt < 2) delay(400L * (attempt + 1))
+                return@repeat
+            }
+            if (!response.status.isSuccess()) {
+                throw XtreamException(
+                    when (response.status.value) {
+                        401, 403 -> "Server refused the request (HTTP ${response.status.value}). Check the username and password."
+                        404 -> "Server has no Xtream API at this address (HTTP 404). Check the port and path."
+                        else -> "Server returned HTTP ${response.status.value}."
+                    }
+                )
+            }
+            return try {
+                response.bodyAsText()
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                throw XtreamException("Couldn't read the server's response: ${t.message}", t)
+            }
+        }
+        throw XtreamException("Couldn't reach the server: ${lastError?.message}", lastError)
     }
 }
 
@@ -387,92 +421,26 @@ data class XtreamAccount(
     }
 }
 
-// Panels vary field types between endpoints, so never trust getInt/getString.
-private fun JSONObject.lenientString(key: String): String? {
-    if (isNull(key)) return null
-    val v = opt(key) ?: return null
-    val s = v.toString()
-    return if (s == "null" || s.isEmpty()) null else s
-}
-private fun JSONObject.lenientInt(key: String): Int? = lenientString(key)?.toIntOrNull()
-private fun JSONObject.lenientLong(key: String): Long? = lenientString(key)?.toLongOrNull()
+// Panels vary field types between endpoints (a number on one, a quoted
+// string on the next) - JsonPrimitive.contentOrNull reads either shape as a
+// plain string regardless of which one the panel actually sent, which is
+// the same leniency the Fire TV original hand-rolled via lenientString().
+private fun JsonObject.str(key: String): String? =
+    (this[key] as? JsonPrimitive)?.contentOrNull
+private fun JsonObject.int(key: String): Int? = str(key)?.toIntOrNull()
+private fun JsonObject.long(key: String): Long? = str(key)?.toLongOrNull()
 
 /**
- * Streaming counterpart to org.json's JSONArray/JSONObject, used only for the
- * three catalogue endpoints that can be large enough to matter (see the class
- * doc comment above). Reads one element at a time straight from the response
- * stream - the whole array is never held in memory, only whichever single
- * element is currently being read plus whatever the caller decides to keep
- * (typically a small Channel, not the raw JSON with every field the panel
- * sent).
+ * Some panels send a VOD/series item's category as "category_id" (a single
+ * value); others send only "category_ids" - a JSON array - instead. The
+ * first scalar element of that array is kept; the Fire TV original does the
+ * same, since nothing here needs more than one id per item.
  */
-private fun streamArray(input: InputStream, onObject: (Map<String, String?>) -> Unit) {
-    val reader = JsonReader(BufferedReader(InputStreamReader(input, Charsets.UTF_8)))
-    reader.isLenient = true
-    reader.beginArray()
-    while (reader.hasNext()) {
-        // A provider mixing a stray scalar into what's declared an array of
-        // objects is rare, but one bad element should skip, not kill the rest
-        // of the catalogue.
-        if (reader.peek() == JsonToken.BEGIN_OBJECT) {
-            onObject(reader.readFlatObject())
-        } else {
-            reader.skipValue()
-        }
+private fun JsonObject.categoryKey(): String? {
+    str("category_id")?.let { return it }
+    val ids = this["category_ids"] as? JsonArray ?: return null
+    for (el in ids) {
+        (el as? JsonPrimitive)?.contentOrNull?.let { return it }
     }
-    reader.endArray()
-}
-
-/**
- * Reads the current object's scalar fields into a flat map - same "be
- * lenient about types" behaviour as [lenientString]/[lenientInt] above,
- * coercing numbers/booleans to strings rather than requiring a caller to
- * know which type a given panel used for a given field. Nested objects (an
- * "info" block, and similar) are skipped rather than read, since nothing
- * here needs them and reading them would mean holding more of the response
- * in memory than necessary.
- *
- * Arrays are a partial exception. Some panels send a VOD/series item's
- * category as "category_id" (a single value); others send only
- * "category_ids" - a JSON array - instead, sometimes alongside a genre or
- * cast array too. Unconditionally skipping every array, as this used to,
- * meant every item on a "category_ids"-only panel came back with no
- * category at all, which is indistinguishable from a genuinely uncategorised
- * title - every movie and show in the account fell into one lump instead of
- * the panel's real category breakdown. The first scalar element of any
- * array field is kept for exactly this reason; the rest is still discarded
- * unread; a small handful of ids is cheap, nothing here needs more than one.
- */
-private fun JsonReader.readFlatObject(): Map<String, String?> {
-    val out = HashMap<String, String?>()
-    beginObject()
-    while (hasNext()) {
-        val name = nextName()
-        when (peek()) {
-            JsonToken.STRING, JsonToken.NUMBER -> {
-                val s = nextString()
-                out[name] = if (s.isEmpty() || s == "null") null else s
-            }
-            JsonToken.BOOLEAN -> out[name] = nextBoolean().toString()
-            JsonToken.NULL -> { nextNull(); out[name] = null }
-            JsonToken.BEGIN_ARRAY -> {
-                beginArray()
-                var first: String? = null
-                while (hasNext()) {
-                    when (peek()) {
-                        JsonToken.STRING, JsonToken.NUMBER -> {
-                            val v = nextString()
-                            if (first == null && v.isNotEmpty() && v != "null") first = v
-                        }
-                        else -> skipValue()
-                    }
-                }
-                endArray()
-                out[name] = first
-            }
-            else -> skipValue()
-        }
-    }
-    endObject()
-    return out
+    return null
 }
