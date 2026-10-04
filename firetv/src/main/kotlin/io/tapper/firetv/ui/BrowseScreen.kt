@@ -745,6 +745,20 @@ fun BrowseScreen(
         }
     }
 
+    // This column (My List's kind breakdown, History, All, and every
+    // category row below) deliberately does NOT act on D-pad focus alone
+    // any more - only onClick changes myListKindFilter/historySelected/
+    // categoryFilter. The NAV, COUNTRY and CHANNEL columns still do (arrowing
+    // through countries, or through channels for the guide/info panel, live-
+    // updates on focus on purpose) - this column is the one exception,
+    // because "just looking" at the category list is exactly what landed
+    // here: arrowing off "All" onto whatever row happened to sort first (an
+    // account's own category, e.g. "Entertainment") used to filter the whole
+    // channel list immediately, with no select press, which read as the
+    // screen randomly jumping into a category instead of staying on "All"
+    // while it was merely being glanced at. onFocused is kept only for the
+    // depth-promotion side effect (arrowing right into this column from NAV/
+    // COUNTRY) - never for the row's own selection state any more.
     @Composable
     fun categoryListBody() {
         // My List spans every kind, so this column is repurposed here as a
@@ -773,8 +787,9 @@ fun BrowseScreen(
                         // Selecting worked because onClick on the NAV row
                         // (see "My List" below) sets depth explicitly -
                         // arrowing right never went through that path.
+                        // myListKindFilter itself is set by onClick only now
+                        // - see this function's own doc comment above.
                         onFocused = {
-                            myListKindFilter = null
                             if (depth == Depth.NAV) depth = Depth.CATEGORY
                         },
                         onClick = { myListKindFilter = null },
@@ -787,7 +802,6 @@ fun BrowseScreen(
                         subtitle = "$count",
                         selected = myListKindFilter == k,
                         onFocused = {
-                            myListKindFilter = k
                             if (depth == Depth.NAV) depth = Depth.CATEGORY
                         },
                         onClick = { myListKindFilter = k },
@@ -814,7 +828,6 @@ fun BrowseScreen(
                         selected = historySelected,
                         modifier = Modifier.focusRequester(firstCategoryFocus),
                         onFocused = {
-                            historySelected = true; categoryFilter = null
                             if (depth == Depth.COUNTRY) depth = Depth.CATEGORY
                         },
                         onClick = { historySelected = true; categoryFilter = null },
@@ -829,7 +842,6 @@ fun BrowseScreen(
                     selected = !historySelected && categoryFilter == null,
                     modifier = if (showHistory) Modifier else Modifier.focusRequester(firstCategoryFocus),
                     onFocused = {
-                        historySelected = false; categoryFilter = null
                         if (depth == Depth.COUNTRY) depth = Depth.CATEGORY
                     },
                     onClick = { historySelected = false; categoryFilter = null },
@@ -843,7 +855,6 @@ fun BrowseScreen(
                     subtitle = "${entry.value}",
                     selected = !historySelected && categoryFilter == entry.key,
                     onFocused = {
-                        historySelected = false; categoryFilter = entry.key
                         if (depth == Depth.COUNTRY) depth = Depth.CATEGORY
                     },
                     onClick = { historySelected = false; categoryFilter = entry.key },
