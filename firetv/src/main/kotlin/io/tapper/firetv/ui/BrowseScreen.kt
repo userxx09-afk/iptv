@@ -1077,6 +1077,19 @@ fun BrowseScreen(
                 if (full) {
                     Text(heading, style = MaterialTheme.typography.headlineLarge, color = Ink,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // TEMPORARY DIAGNOSTIC for the "jumps to Entertainment
+                    // instead of showing all categories" investigation -
+                    // remove once that's resolved. Prints exactly what this
+                    // screen computed, right on screen, since there's no adb
+                    // access to this device to read logs otherwise.
+                    Text(
+                        "DEBUG depth=$depth hasRealCountries=${hasRealCountries(kind)} " +
+                            "country=${selectedCountry?.key}/${selectedCountry?.label} " +
+                            "categoryFilter=$categoryFilter historySelected=$historySelected " +
+                            "cats=${categoryCounts.size} first3=${categoryCounts.take(3).map { it.key }} " +
+                            "pinned=$pinnedCategories navHome=${navHome.get(kind)}",
+                        style = MaterialTheme.typography.bodySmall, color = Color.Red, maxLines = 4,
+                    )
                     Spacer(Modifier.height(10.dp))
                 }
                 categoryListBody()
@@ -1101,6 +1114,18 @@ fun BrowseScreen(
                 if (full) {
                     Text(heading, style = MaterialTheme.typography.headlineLarge, color = Ink,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // TEMPORARY DIAGNOSTIC - see the matching one in the
+                    // CATEGORY column above; this one fires when enterKind
+                    // skipped straight past the category rail into the
+                    // channel list directly (hasRealCountries(kind) == true).
+                    Text(
+                        "DEBUG depth=$depth hasRealCountries=${hasRealCountries(kind)} " +
+                            "country=${selectedCountry?.key}/${selectedCountry?.label} " +
+                            "categoryFilter=$categoryFilter historySelected=$historySelected " +
+                            "cats=${categoryCounts.size} first3=${categoryCounts.take(3).map { it.key }} " +
+                            "pinned=$pinnedCategories navHome=${navHome.get(kind)}",
+                        style = MaterialTheme.typography.bodySmall, color = Color.Red, maxLines = 4,
+                    )
                     Spacer(Modifier.height(10.dp))
                 }
                 channelListBody()
