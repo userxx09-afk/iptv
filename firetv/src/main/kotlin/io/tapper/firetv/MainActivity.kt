@@ -94,6 +94,35 @@ class MainActivity : ComponentActivity() {
             fun pop() { if (stack.size > 1) stack = stack.dropLast(1) }
             fun replaceAll(s: Screen) { stack = listOf(s) }
             var playing by remember { mutableStateOf<Playing?>(null) }
+            // false = the stream has dropped into the top-right corner picture
+            // over BrowseScreen (live only) - see PlayerScreen's `minimized`.
+            var playerFullscreen by remember { mutableStateOf(true) }
+            // Bumped for every NEW playback request so PlayerScreen is rebuilt
+            // for it (key() below). Needed now that a player can outlive the
+            // screen that started it: without it a second Select while the
+            // corner picture is up would hand the already-running player a
+            // new channel list it ignores (its index state is remembered).
+            var playToken by remember { mutableIntStateOf(0) }
+            // What PlayerScreen is actually showing right now (it can zap away
+            // from whatever list started it) - what Back-to-browse reveals.
+            var playingChannel by remember { mutableStateOf<Channel?>(null) }
+            // Bumped when the player drops to the corner; BrowseScreen then
+            // navigates to playingChannel and focuses it.
+            var revealToken by remember { mutableIntStateOf(0) }
+            var revealChannel by remember { mutableStateOf<Channel?>(null) }
+            fun startPlayback(p: Playing) {
+                playToken++
+                playing = p
+                playerFullscreen = true
+            }
+            fun stopPlayback() {
+                playing = null
+                playingChannel = null
+                playerFullscreen = true
+                // Publish as soon as viewing stops, so the other
+                // device sees it without waiting for a launch.
+                lifecycleScope.launch { app.sync.sync() }
+            }
             var sources by remember { mutableStateOf(app.sourceStore.all()) }
             var active by remember { mutableStateOf(app.sourceStore.active()) }
             var busy by remember { mutableStateOf(false) }
@@ -363,7 +392,7 @@ class MainActivity : ComponentActivity() {
                             val ch = cat.channels.firstOrNull { it.id == lastChannelId }
                             if (ch != null && ch.isPlayable) {
                                 val list = cat.channels.filter { it.kind == ch.kind }
-                                playing = Playing(list, list.indexOf(ch).coerceAtLeast(0))
+                                startPlayback(Playing(list, list.indexOf(ch).coerceAtLeast(0)))
                             }
                         }
                         epgStatus = if (app.epg.hasData(active.id)) null else "Guide: none yet"
@@ -458,7 +487,22 @@ class MainActivity : ComponentActivity() {
                 // defence: only a SECOND press within the grace window
                 // actually exits, and a lone press just arms the warning.
                 var exitArmedAt by remember { mutableStateOf(0L) }
+
+                // The corner picture only makes sense over BrowseScreen: any
+                // other screen taking over (Settings, Search, an episode
+                // list...) ends it rather than leaving it floating over them.
+                LaunchedEffect(current is Screen.Browse) {
+                    if (playing != null && !playerFullscreen && current !is Screen.Browse) stopPlayback()
+                }
+
                 BackHandler {
+                    // Back with nothing left to back out of inside Browse and a
+                    // corner picture still playing: stop the picture first, so
+                    // only a further press can arm the exit below.
+                    if (playing != null && !playerFullscreen) {
+                        stopPlayback()
+                        return@BackHandler
+                    }
                     val now = System.currentTimeMillis()
                     if (now - exitArmedAt < 2000) {
                         finish()
@@ -505,7 +549,7 @@ class MainActivity : ComponentActivity() {
                                 )?.itemId
                             }
                         },
-                        onPlay = { list, i -> playing = Playing(list, i) },
+                        onPlay = { list, i -> startPlayback(Playing(list, i)) },
                         onExit = { pop() },
                     )
 
@@ -550,7 +594,7 @@ class MainActivity : ComponentActivity() {
                             // A series has no stream; selecting one from search
                             // must open its episode list, not the player.
                             if (ch.kind == ContentKind.SERIES) openSeries(ch)
-                            else { playing = Playing(listOf(ch), 0); pop() }
+                            else { startPlayback(Playing(listOf(ch), 0)); pop() }
                         },
                         onSetGuideChannel = { push(Screen.EpgPick(it)) },
                         onExit = { pop() },
@@ -768,8 +812,20 @@ class MainActivity : ComponentActivity() {
                         // both share the one status slot under the source name.
                         epgStatus = loadStatus ?: epgStatus,
                         onPlay = { list, i ->
-                            playing = Playing(list, i, resolvedCatalogue.section(ContentKind.LIVE)?.items.orEmpty())
+                            val target = list.getOrNull(i)
+                            if (playing != null && target != null && target.id == playingChannel?.id) {
+                                // Already on in the corner: just enlarge it,
+                                // rather than re-tuning the same stream.
+                                playerFullscreen = true
+                            } else {
+                                startPlayback(
+                                    Playing(list, i, resolvedCatalogue.section(ContentKind.LIVE)?.items.orEmpty())
+                                )
+                            }
                         },
+                        miniPlayerActive = playing != null && !playerFullscreen,
+                        revealChannel = revealChannel,
+                        revealToken = revealToken,
                         onSwitchSource = { app.sourceStore.activeId = it.id; active = it },
                         onAddSource = { addError = null; push(Screen.AddSource) },
                         onSearch = { push(Screen.Search) },
@@ -874,7 +930,7 @@ class MainActivity : ComponentActivity() {
                                     streams = listOf(StreamRef(url = "file://" + path, priority = 0)),
                                     kind = ContentKind.MOVIE,
                                 )
-                                playing = Playing(listOf(synthetic), 0)
+                                startPlayback(Playing(listOf(synthetic), 0))
                             }
                         },
                         onStop = { r ->
@@ -894,7 +950,18 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 if (p != null) {
+                    key(playToken) {
                     PlayerScreen(
+                        minimized = !playerFullscreen,
+                        // Back from a LIVE stream started in Browse drops it
+                        // into the corner instead of stopping it; anything
+                        // else (movies, episodes, recordings, or a stream
+                        // started from Search) keeps the old Back = stop.
+                        onMinimize = if (current is Screen.Browse && playingChannel?.kind == ContentKind.LIVE) ({
+                            revealChannel = playingChannel
+                            revealToken++
+                            playerFullscreen = false
+                        }) else null,
                         channels = p.channels,
                         startIndex = p.index,
                         allLiveChannels = p.allLiveChannels,
@@ -904,6 +971,7 @@ class MainActivity : ComponentActivity() {
                         },
                         resumeAt = { ch -> app.sync.resumeAt(ch.id) },
                         onChannelChanged = { ch ->
+                            playingChannel = ch
                             lastChannelId = ch.id
                             app.sourceStore.lastChannelId = ch.id
                         },
@@ -921,14 +989,10 @@ class MainActivity : ComponentActivity() {
                             )
                             watchRevision++
                         },
-                        onExit = {
-                            playing = null
-                            // Publish as soon as viewing stops, so the other
-                            // device sees it without waiting for a launch.
-                            lifecycleScope.launch { app.sync.sync() }
-                        },
+                        onExit = { stopPlayback() },
                         bufferSize = bufferSize,
                     )
+                    }
                 }
                 }
             }
