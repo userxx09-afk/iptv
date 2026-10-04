@@ -422,7 +422,8 @@ fun BrowseScreen(
         )
     }
     val baseChannels = if (myListActive) myListChannels else channelsInCountry
-    val shown = remember(baseChannels, categoryFilter, myListActive, myListKindFilter, historySelected, recentChannels) {
+    val pinnedChannelIds = remember(revision) { favorites.pinnedChannels() }
+    val shown = remember(baseChannels, categoryFilter, myListActive, myListKindFilter, historySelected, recentChannels, pinnedChannelIds) {
         val filtered = when {
             myListActive -> if (myListKindFilter == null) baseChannels
                 else baseChannels.filter { it.kind == myListKindFilter }
@@ -443,7 +444,13 @@ fun BrowseScreen(
         // it throws - and only once both copies are composed at the same time,
         // which is why it surfaced when scrolling back to the top rather than
         // on first display.
-        filtered.distinctBy { it.id }
+        val unique = filtered.distinctBy { it.id }
+        // Pinned channels float to the top of whatever list this is. History
+        // is left alone - it's already ordered by what was watched most
+        // recently, and pinning shouldn't override that. sortedBy is stable,
+        // so everything else keeps its existing order, pinned or not.
+        if (historySelected || pinnedChannelIds.isEmpty()) unique
+        else unique.sortedBy { "${it.sourceId}|${it.id}" !in pinnedChannelIds }
     }
     // "Ungrouped" is the byCountry bucket's own label for "no country token
     // found" - correct as an internal name for that bucket, but it reads as
@@ -708,6 +715,7 @@ fun BrowseScreen(
         LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             itemsIndexed(shown, key = { _, it -> "${it.sourceId}|${it.id}" }) { i, ch ->
                 val isFav = remember(revision, ch.id) { favorites.isFavorite(ch.sourceId, ch.id) }
+                val isPinnedCh = remember(revision, ch.id) { favorites.isPinnedChannel(ch.sourceId, ch.id) }
                 // A series is a container, not a stream: opening it lists
                 // episodes rather than handing an empty URL to the player.
                 val activate: () -> Unit =
@@ -716,6 +724,7 @@ fun BrowseScreen(
                 ChannelRow(
                     channel = ch,
                     favorite = isFav,
+                    pinned = isPinnedCh,
                     modifier = if (i == 0) Modifier.focusRequester(firstChannelFocus) else Modifier,
                     onFocused = {
                         focusedChannel = ch
@@ -736,6 +745,9 @@ fun BrowseScreen(
                                     MenuAction(
                                         if (isFav) "Remove from My List" else "Add to My List"
                                     ) { favorites.toggle(ch.sourceId, ch.id); revision++ },
+                                    MenuAction(
+                                        if (isPinnedCh) "Unpin from top" else "Pin to top"
+                                    ) { favorites.togglePinnedChannel(ch.sourceId, ch.id); revision++ },
                                 ) + if (ch.kind == ContentKind.LIVE) listOf(
                                     // The fix for a channel whose guide never
                                     // loads: point it at whichever guide id
@@ -1266,6 +1278,7 @@ private fun RailRow(
 private fun ChannelRow(
     channel: Channel,
     favorite: Boolean,
+    pinned: Boolean = false,
     programme: EpgDatabase.Programme?,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit,
@@ -1328,6 +1341,11 @@ private fun ChannelRow(
                     iterations = Int.MAX_VALUE, initialDelayMillis = 800, repeatDelayMillis = 1500,
                 ),
             )
+        }
+        if (pinned) {
+            // Same "[pin]" wording the country and category rails already use.
+            Text("[pin]", style = MaterialTheme.typography.bodyMedium, color = Focus)
+            Spacer(Modifier.width(12.dp))
         }
         if (favorite) {
             Text("*", style = MaterialTheme.typography.titleMedium, color = Focus)
