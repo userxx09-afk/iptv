@@ -652,10 +652,36 @@ fun BrowseScreen(
     // Declared up here (not beside the effect that scrolls it) because the
     // pendingFocus effect below also needs to scroll it before focusing.
     val listState = rememberLazyListState()
+    // Hoisted for the same reason: the country and category columns are
+    // taken out of composition while a deeper column is open, so on stepping
+    // back in, the row to focus (the selected one - see the modifiers on
+    // those rows) may be off screen and not composed, and a row that is not
+    // composed has no focus requester to find.
+    val countryListState = rememberLazyListState()
+    val categoryListState = rememberLazyListState()
     LaunchedEffect(pendingFocus) {
         when (pendingFocus) {
-            Depth.COUNTRY -> requestFocusRetrying(firstCountryFocus)
-            Depth.CATEGORY -> requestFocusRetrying(firstCategoryFocus)
+            Depth.COUNTRY -> {
+                val ci = countryGroups.indexOf(selectedCountry)
+                if (ci >= 0) runCatching { countryListState.scrollToItem(ci) }
+                requestFocusRetrying(firstCountryFocus)
+            }
+            Depth.CATEGORY -> {
+                // Mirrors the row order in categoryListBody.
+                val ci = if (myListActive) {
+                    if (myListKindFilter == null) 0
+                    else 1 + myListKindCounts.indexOfFirst { it.first == myListKindFilter }
+                } else {
+                    val base = if (recentChannels.isNotEmpty()) 1 else 0
+                    when {
+                        historySelected -> 0
+                        categoryFilter == null -> base
+                        else -> base + 1 + categoryCounts.indexOfFirst { it.key == categoryFilter }
+                    }
+                }
+                if (ci >= 0) runCatching { categoryListState.scrollToItem(ci) }
+                requestFocusRetrying(firstCategoryFocus)
+            }
             Depth.CHANNELS -> {
                 // The target row may be off screen (LazyColumn only composes
                 // what is visible), and a row that is not composed has no
@@ -894,19 +920,13 @@ fun BrowseScreen(
     }
 
     // This column (My List's kind breakdown, History, All, and every
-    // category row below) deliberately does NOT act on D-pad focus alone
-    // any more - only onClick changes myListKindFilter/historySelected/
-    // categoryFilter. The NAV, COUNTRY and CHANNEL columns still do (arrowing
-    // through countries, or through channels for the guide/info panel, live-
-    // updates on focus on purpose) - this column is the one exception,
-    // because "just looking" at the category list is exactly what landed
-    // here: arrowing off "All" onto whatever row happened to sort first (an
-    // account's own category, e.g. "Entertainment") used to filter the whole
-    // channel list immediately, with no select press, which read as the
-    // screen randomly jumping into a category instead of staying on "All"
-    // while it was merely being glanced at. onFocused is kept only for the
-    // depth-promotion side effect (arrowing right into this column from NAV/
-    // COUNTRY) - never for the row's own selection state any more.
+    // category row below) previews on D-pad focus, like the country column:
+    // highlighting a row filters the channel list beside it to that category
+    // so you can see what is on without committing to it, and Select dives
+    // into that list. The row that is currently filtered is also the one that
+    // gets focus when stepping back into this column (see the focus
+    // requesters below), so Left/Back out of the channel list never changes
+    // the category by itself.
     @Composable
     fun categoryListBody() {
         // My List spans every kind, so this column is repurposed here as a
@@ -917,7 +937,7 @@ fun BrowseScreen(
         // categoryCounts, historySelected, pinned categories) means anything
         // for My List.
         if (myListActive) {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            LazyColumn(state = categoryListState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 item {
                     RailRow(
                         title = "All",
@@ -973,7 +993,7 @@ fun BrowseScreen(
         // useful; the country column's own Recently Watched entry is one
         // LEFT-arrow further away and effectively hidden for those two kinds.
         val showHistory = recentChannels.isNotEmpty()
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LazyColumn(state = categoryListState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (showHistory) {
                 item {
                     RailRow(
@@ -1177,7 +1197,7 @@ fun BrowseScreen(
                 Text(kindLabel(kind), style = MaterialTheme.typography.headlineLarge, color = Ink,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(10.dp))
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                LazyColumn(state = countryListState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     itemsIndexed(countryGroups, key = { _, g -> g.key ?: " " }) { i, g ->
                         val isPinned = g.key != null && g.key in pinned
                         RailRow(
@@ -1185,7 +1205,15 @@ fun BrowseScreen(
                                 else if (isPinned) "[pin] ${g.label}" else g.label,
                             subtitle = "${g.channels.size}",
                             selected = g == selectedCountry,
-                            modifier = if (i == 0) Modifier.focusRequester(firstCountryFocus) else Modifier,
+                            // The selected country, not blindly row 0: stepping
+                            // back out of the category list (Left/Back) lands
+                            // here, and every country row switches
+                            // selectedCountry the moment it is focused - so
+                            // focusing row 0 swapped the whole screen over to
+                            // a different country's programming. Row 0 stays
+                            // the fallback when nothing here is selected.
+                            modifier = if (if (selectedCountry in countryGroups) g == selectedCountry else i == 0)
+                                Modifier.focusRequester(firstCountryFocus) else Modifier,
                             onFocused = {
                                 if (selectedCountry != g) selectedCountry = g
                                 if (depth == Depth.NAV) depth = Depth.COUNTRY
