@@ -649,11 +649,21 @@ fun BrowseScreen(
     val firstCountryFocus = remember { FocusRequester() }
     val firstCategoryFocus = remember { FocusRequester() }
     val firstChannelFocus = remember { FocusRequester() }
+    // Declared up here (not beside the effect that scrolls it) because the
+    // pendingFocus effect below also needs to scroll it before focusing.
+    val listState = rememberLazyListState()
     LaunchedEffect(pendingFocus) {
         when (pendingFocus) {
             Depth.COUNTRY -> requestFocusRetrying(firstCountryFocus)
             Depth.CATEGORY -> requestFocusRetrying(firstCategoryFocus)
-            Depth.CHANNELS -> requestFocusRetrying(firstChannelFocus)
+            Depth.CHANNELS -> {
+                // The target row may be off screen (LazyColumn only composes
+                // what is visible), and a row that is not composed has no
+                // focus requester to find.
+                val idx = shown.indexOfFirst { it.id == channelFocusId }
+                if (idx >= 0) runCatching { listState.scrollToItem(idx) }
+                requestFocusRetrying(firstChannelFocus)
+            }
             else -> {}
         }
         if (pendingFocus == Depth.CHANNELS) channelFocusId = null
@@ -698,13 +708,55 @@ fun BrowseScreen(
     // collapsed to 0dp for them - so that same default search simply finds
     // nothing and does nothing, rather than the wrong thing.
     val rightArrowEntersKind = Modifier.onKeyEvent { e ->
-        if (e.key != Key.DirectionRight || navPreview != NavPreview.KIND) return@onKeyEvent false
-        if (e.type == KeyEventType.KeyUp) enterKind(kind)
-        true
+        if (e.key != Key.DirectionRight) return@onKeyEvent false
+        when (navPreview) {
+            NavPreview.KIND -> {
+                if (e.type == KeyEventType.KeyUp) enterKind(kind)
+                true
+            }
+            // Same landing as clicking My List (see its NAV row below): the
+            // kind breakdown, on its selected row - not whichever row
+            // Compose's spatial search happens to find nearest.
+            NavPreview.MY_LIST -> {
+                if (e.type == KeyEventType.KeyUp) {
+                    myListActive = true; depth = Depth.CATEGORY; pendingFocus = Depth.CATEGORY
+                }
+                true
+            }
+            NavPreview.NONE -> false
+        }
+    }
+
+    // RIGHT is the mirror image of LEFT (leftArrowGoesBack) one level at a
+    // time: country -> category -> channel list. Left alone, Compose's own
+    // spatial focus search picks the row in the next column that is nearest
+    // vertically to the one just left - so after Left, Right landed on a
+    // different, arbitrary row (and with the category rail now live-
+    // previewing on focus, an arbitrary category). Handled explicitly instead:
+    // category lands on its selected row (pendingFocus -> firstCategoryFocus),
+    // the channel list on the channel last focused or watched if it is in
+    // this list, else the top. Both KeyDown and KeyUp are consumed for the
+    // same reason as LEFT. The channel list -> guide step is left to spatial
+    // search; the guide panel is the only focusable thing in that column.
+    val rightArrowGoesIn = Modifier.onKeyEvent { e ->
+        if (e.key != Key.DirectionRight) return@onKeyEvent false
+        when (depth) {
+            Depth.COUNTRY -> {
+                if (e.type == KeyEventType.KeyUp) { depth = Depth.CATEGORY; pendingFocus = Depth.CATEGORY }
+                true
+            }
+            Depth.CATEGORY -> {
+                if (e.type == KeyEventType.KeyUp && shown.isNotEmpty()) {
+                    channelFocusId = shown.firstOrNull { it.id == initialChannelId }?.id
+                    depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
+                }
+                true
+            }
+            else -> false
+        }
     }
 
     // Scrolls the channel list so the channel that was playing is on screen.
-    val listState = rememberLazyListState()
     LaunchedEffect(shown, initialChannelId) {
         val idx = shown.indexOfFirst { it.id == initialChannelId }
         if (idx >= 0) runCatching { listState.scrollToItem(idx) }
@@ -1121,7 +1173,7 @@ fun BrowseScreen(
 
         // COUNTRY
         if ((depth == Depth.NAV && navPreview == NavPreview.KIND) || depth == Depth.COUNTRY) {
-            Column(Modifier.weight(1f).fillMaxHeight().then(leftArrowGoesBack)) {
+            Column(Modifier.weight(1f).fillMaxHeight().then(leftArrowGoesBack).then(rightArrowGoesIn)) {
                 Text(kindLabel(kind), style = MaterialTheme.typography.headlineLarge, color = Ink,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(10.dp))
@@ -1191,6 +1243,7 @@ fun BrowseScreen(
                     )
                     .fillMaxHeight()
                     .then(leftArrowGoesBack)
+                    .then(rightArrowGoesIn)
             ) {
                 if (full) {
                     Text(heading, style = MaterialTheme.typography.headlineLarge, color = Ink,
