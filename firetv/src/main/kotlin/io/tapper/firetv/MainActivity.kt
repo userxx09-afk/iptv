@@ -953,6 +953,7 @@ class MainActivity : ComponentActivity() {
                     key(playToken) {
                     PlayerScreen(
                         minimized = !playerFullscreen,
+                        onExpand = { playerFullscreen = true },
                         // Back from a LIVE stream started in Browse drops it
                         // into the corner instead of stopping it; anything
                         // else (movies, episodes, recordings, or a stream
