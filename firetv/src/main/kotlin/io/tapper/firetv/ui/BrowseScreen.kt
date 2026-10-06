@@ -598,13 +598,25 @@ fun BrowseScreen(
     // picture - see MiniPlayerWidth.
     val miniTop = if (miniPlayerActive) MiniPlayerHeight + MiniPlayerGap else 0.dp
 
+    // What the area beside the NAV column previews while NAV itself has focus.
+    // A kind with a real per-country split (Live TV) previews its country
+    // list. Movies and Shows have none - everything sits in one "Ungrouped"
+    // bucket - so a country list there was a single, misleadingly named row
+    // ("Ungrouped") that had to be opened just to reach the actual
+    // categories. They preview the category list directly instead, the same
+    // way My List does, and the country column is never shown for them (it
+    // was already skipped everywhere else - see enterKind/goBack).
+    val navPreviewsCountries = depth == Depth.NAV && navPreview == NavPreview.KIND && hasRealCountries(kind)
+    val navPreviewsCategories = depth == Depth.NAV &&
+        (navPreview == NavPreview.MY_LIST || (navPreview == NavPreview.KIND && !hasRealCountries(kind)))
+
     val navWidth by animateDpAsState(if (depth == Depth.NAV) 300.dp else 64.dp, label = "nav")
     // Each of these is only ever rendered at its 0.dp target - the full/peek
     // states below use weight(1f) or a fixed dp directly instead. The
     // non-zero branch exists purely so the shrink has a real width to
     // animate from the instant its column is left behind.
     val countryHiddenWidth by animateDpAsState(
-        if ((depth == Depth.NAV && navPreview == NavPreview.KIND) || depth == Depth.COUNTRY) 340.dp else 0.dp,
+        if (navPreviewsCountries || depth == Depth.COUNTRY) 340.dp else 0.dp,
         label = "country",
     )
     val categoryWidth by animateDpAsState(
@@ -1192,7 +1204,7 @@ fun BrowseScreen(
         Spacer(Modifier.width(if (depth == Depth.NAV) 32.dp else 20.dp))
 
         // COUNTRY
-        if ((depth == Depth.NAV && navPreview == NavPreview.KIND) || depth == Depth.COUNTRY) {
+        if (navPreviewsCountries || depth == Depth.COUNTRY) {
             Column(Modifier.weight(1f).fillMaxHeight().then(leftArrowGoesBack).then(rightArrowGoesIn)) {
                 Text(kindLabel(kind), style = MaterialTheme.typography.headlineLarge, color = Ink,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1261,8 +1273,8 @@ fun BrowseScreen(
         // above goes full-width to preview a highlighted kind at depth==NAV,
         // since there is no COUNTRY column shown alongside it to share space
         // with in that case.
-        if (depth == Depth.COUNTRY || depth == Depth.CATEGORY || (depth == Depth.NAV && navPreview == NavPreview.MY_LIST)) {
-            val full = depth == Depth.CATEGORY || (depth == Depth.NAV && navPreview == NavPreview.MY_LIST)
+        if (depth == Depth.COUNTRY || depth == Depth.CATEGORY || navPreviewsCategories) {
+            val full = depth == Depth.CATEGORY || navPreviewsCategories
             Column(
                 Modifier
                     .then(
