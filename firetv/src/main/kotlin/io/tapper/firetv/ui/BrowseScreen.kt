@@ -542,6 +542,9 @@ fun BrowseScreen(
     fun hasRealCountries(k: ContentKind) = catalogue.section(k)?.byCountry.orEmpty().any { it.key != null }
 
     fun goBack() {
+        // Stepping back out of the guide returns to the channel whose guide
+        // it was, not the top of the list.
+        if (depth == Depth.GUIDE) channelFocusId = focusedChannel?.id
         val next = when (depth) {
             Depth.GUIDE -> Depth.CHANNELS
             // My List now has a real CATEGORY-equivalent column (the kind
@@ -589,7 +592,7 @@ fun BrowseScreen(
         myListActive = false
         kind = k
         when {
-            navHome.get(k) != null -> { depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
+            navHome.get(k) != null -> { channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
             else -> { depth = Depth.CATEGORY; pendingFocus = Depth.CATEGORY }
         }
     }
@@ -704,7 +707,13 @@ fun BrowseScreen(
             }
             else -> {}
         }
-        if (pendingFocus == Depth.CHANNELS) channelFocusId = null
+        // channelFocusId is deliberately NOT cleared here. Clearing it moved
+        // the focus requester from the row that had just taken focus back to
+        // row 0 - which dropped focus off the channel list entirely, and
+        // Android's default then put it on the first focusable thing on
+        // screen (the collapsed menu icon at the far left). Every place that
+        // sets pendingFocus = CHANNELS now sets channelFocusId itself
+        // (null = top row) instead, so there is nothing stale to clean up.
         pendingFocus = null
     }
 
@@ -874,6 +883,9 @@ fun BrowseScreen(
                 style = MaterialTheme.typography.bodyLarge, color = Dim,
             )
         }
+        // Only honoured while that channel is actually in this list - a stale
+        // id with no matching row would leave no row holding the requester.
+        val focusRowId = channelFocusId?.takeIf { id -> shown.any { it.id == id } }
         LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             itemsIndexed(shown, key = { _, it -> "${it.sourceId}|${it.id}" }) { i, ch ->
                 val isFav = remember(revision, ch.id) { favorites.isFavorite(ch.sourceId, ch.id) }
@@ -887,7 +899,7 @@ fun BrowseScreen(
                     channel = ch,
                     favorite = isFav,
                     pinned = isPinnedCh,
-                    modifier = if (if (channelFocusId != null) ch.id == channelFocusId else i == 0)
+                    modifier = if (if (focusRowId != null) ch.id == focusRowId else i == 0)
                         Modifier.focusRequester(firstChannelFocus) else Modifier,
                     onFocused = {
                         focusedChannel = ch
@@ -975,7 +987,7 @@ fun BrowseScreen(
                         },
                         onClick = {
                             myListKindFilter = null
-                            if (myListChannels.isNotEmpty()) { depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
+                            if (myListChannels.isNotEmpty()) { channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
                         },
                         onLongPress = {},
                     )
@@ -990,7 +1002,7 @@ fun BrowseScreen(
                             myListKindFilter = k
                             if (depth == Depth.NAV) depth = Depth.CATEGORY
                         },
-                        onClick = { myListKindFilter = k; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS },
+                        onClick = { myListKindFilter = k; channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS },
                         onLongPress = {},
                     )
                 }
@@ -1019,7 +1031,7 @@ fun BrowseScreen(
                         },
                         onClick = {
                             historySelected = true; categoryFilter = null
-                            depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
+                            channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
                         },
                         onLongPress = {},
                     )
@@ -1037,7 +1049,7 @@ fun BrowseScreen(
                     },
                     onClick = {
                         historySelected = false; categoryFilter = null
-                        if (channelsInCountry.isNotEmpty()) { depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
+                        if (channelsInCountry.isNotEmpty()) { channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
                     },
                     onLongPress = {},
                 )
@@ -1055,7 +1067,7 @@ fun BrowseScreen(
                     },
                     onClick = {
                         historySelected = false; categoryFilter = entry.key
-                        depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
+                        channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
                     },
                     onLongPress = {
                         val category = entry.key
