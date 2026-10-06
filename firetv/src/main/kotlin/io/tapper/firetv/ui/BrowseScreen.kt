@@ -664,6 +664,7 @@ fun BrowseScreen(
     val firstCountryFocus = remember { FocusRequester() }
     val firstCategoryFocus = remember { FocusRequester() }
     val firstChannelFocus = remember { FocusRequester() }
+    val guideFocus = remember { FocusRequester() }
     // Declared up here (not beside the effect that scrolls it) because the
     // pendingFocus effect below also needs to scroll it before focusing.
     val listState = rememberLazyListState()
@@ -765,9 +766,9 @@ fun BrowseScreen(
             // kind breakdown, on its selected row - not whichever row
             // Compose's spatial search happens to find nearest.
             NavPreview.MY_LIST -> {
-                if (e.type == KeyEventType.KeyUp) {
-                    myListActive = true; depth = Depth.CATEGORY; pendingFocus = Depth.CATEGORY
-                }
+                // depth is promoted by the focused row's own onFocused, not
+                // set here - see rightArrowGoesIn below for why.
+                if (e.type == KeyEventType.KeyUp) { myListActive = true; pendingFocus = Depth.CATEGORY }
                 true
             }
             NavPreview.NONE -> false
@@ -785,17 +786,37 @@ fun BrowseScreen(
     // this list, else the top. Both KeyDown and KeyUp are consumed for the
     // same reason as LEFT. The channel list -> guide step is left to spatial
     // search; the guide panel is the only focusable thing in that column.
+    //
+    // None of these set `depth` themselves - they only ask for focus
+    // (pendingFocus) on a row in the NEXT column, which is already composed
+    // beside this one, and that row's own onFocused promotes depth. Setting
+    // depth first removed the focused row's column from the tree before focus
+    // had moved anywhere, which dropped focus and let Android hand it to the
+    // first focusable thing on screen (the collapsed menu icon at the far
+    // left) - the "goes back to the TV menu, arrow over again" bug. Moving
+    // focus first, then letting the layout follow, is how arrowing across
+    // columns always worked.
+    // While the live corner picture is up it is also a focus target, sitting
+    // right above the guide column - so left to spatial search, RIGHT from a
+    // channel near the top of the list would land on the picture instead of
+    // the guide. Sent to the guide explicitly then; the picture is reached
+    // with UP from the guide.
+    val rightArrowToGuide = Modifier.onKeyEvent { e ->
+        if (e.key != Key.DirectionRight || !miniPlayerActive || depth != Depth.CHANNELS) return@onKeyEvent false
+        if (e.type == KeyEventType.KeyUp) runCatching { guideFocus.requestFocus() }
+        true
+    }
     val rightArrowGoesIn = Modifier.onKeyEvent { e ->
         if (e.key != Key.DirectionRight) return@onKeyEvent false
         when (depth) {
             Depth.COUNTRY -> {
-                if (e.type == KeyEventType.KeyUp) { depth = Depth.CATEGORY; pendingFocus = Depth.CATEGORY }
+                if (e.type == KeyEventType.KeyUp) pendingFocus = Depth.CATEGORY
                 true
             }
             Depth.CATEGORY -> {
                 if (e.type == KeyEventType.KeyUp && shown.isNotEmpty()) {
                     channelFocusId = shown.firstOrNull { it.id == initialChannelId }?.id
-                    depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
+                    pendingFocus = Depth.CHANNELS
                 }
                 true
             }
@@ -987,7 +1008,7 @@ fun BrowseScreen(
                         },
                         onClick = {
                             myListKindFilter = null
-                            if (myListChannels.isNotEmpty()) { channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
+                            if (myListChannels.isNotEmpty()) { channelFocusId = null; pendingFocus = Depth.CHANNELS }
                         },
                         onLongPress = {},
                     )
@@ -1002,7 +1023,7 @@ fun BrowseScreen(
                             myListKindFilter = k
                             if (depth == Depth.NAV) depth = Depth.CATEGORY
                         },
-                        onClick = { myListKindFilter = k; channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS },
+                        onClick = { myListKindFilter = k; channelFocusId = null; pendingFocus = Depth.CHANNELS },
                         onLongPress = {},
                     )
                 }
@@ -1031,7 +1052,7 @@ fun BrowseScreen(
                         },
                         onClick = {
                             historySelected = true; categoryFilter = null
-                            channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
+                            channelFocusId = null; pendingFocus = Depth.CHANNELS
                         },
                         onLongPress = {},
                     )
@@ -1049,7 +1070,7 @@ fun BrowseScreen(
                     },
                     onClick = {
                         historySelected = false; categoryFilter = null
-                        if (channelsInCountry.isNotEmpty()) { channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS }
+                        if (channelsInCountry.isNotEmpty()) { channelFocusId = null; pendingFocus = Depth.CHANNELS }
                     },
                     onLongPress = {},
                 )
@@ -1067,7 +1088,7 @@ fun BrowseScreen(
                     },
                     onClick = {
                         historySelected = false; categoryFilter = entry.key
-                        channelFocusId = null; depth = Depth.CHANNELS; pendingFocus = Depth.CHANNELS
+                        channelFocusId = null; pendingFocus = Depth.CHANNELS
                     },
                     onLongPress = {
                         val category = entry.key
@@ -1323,6 +1344,7 @@ fun BrowseScreen(
                     )
                     .fillMaxHeight()
                     .then(leftArrowGoesBack)
+                    .then(rightArrowToGuide)
             ) {
                 if (full) {
                     Text(heading, style = MaterialTheme.typography.headlineLarge, color = Ink,
@@ -1355,6 +1377,7 @@ fun BrowseScreen(
                 .then(if (depth == Depth.GUIDE) Modifier.weight(1f) else Modifier.width(guideWidth))
                 .fillMaxHeight()
                 .padding(top = miniTop)
+                .focusRequester(guideFocus)
                 .then(leftArrowGoesBack)
             if (focusedChannel?.kind == ContentKind.LIVE || focusedChannel == null) {
                 ProgrammePanel(

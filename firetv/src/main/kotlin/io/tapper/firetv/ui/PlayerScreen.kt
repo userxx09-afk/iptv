@@ -79,10 +79,14 @@ fun PlayerScreen(
     // this instead of stopping when onMinimize is supplied (live only).
     minimized: Boolean = false,
     onMinimize: (() -> Unit)? = null,
+    // Select on the corner picture: back to full screen.
+    onExpand: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
     val focus = remember { FocusRequester() }
+    val miniInteraction = remember { MutableInteractionSource() }
+    val miniFocused by miniInteraction.collectIsFocusedAsState()
 
     var index by remember { mutableIntStateOf(startIndex.coerceIn(0, (channels.size - 1).coerceAtLeast(0))) }
     // Set when the expanded guide's category sidebar is used to select a
@@ -189,6 +193,23 @@ fun PlayerScreen(
 
     LaunchedEffect(channel.id, status, minimized) {
         if (status == null && !minimized) { delay(4000); overlayVisible = false }
+    }
+
+    // Safety nets for an overlay that stays on screen after a channel change.
+    // Both depend on ExoPlayer reporting a first rendered frame for the new
+    // stream to clear the "Tuning..." state, and the badge above only
+    // schedules its own hide once that has happened - when that event does
+    // not arrive (it is not guaranteed on every channel switch) both just
+    // sat there. So: notice playback has actually started on its own, and
+    // never leave the badge up for more than a few seconds regardless.
+    LaunchedEffect(channel.id) {
+        repeat(120) {
+            delay(1000)
+            if (status != null && player.isPlaying()) status = null
+        }
+    }
+    LaunchedEffect(channel.id, minimized) {
+        if (!minimized) { delay(8000); overlayVisible = false }
     }
 
     // Closes itself after a few seconds of no interaction, same as the
@@ -429,6 +450,14 @@ fun PlayerScreen(
                 Modifier.padding(top = 27.dp, end = 48.dp)
                     .size(MiniPlayerWidth, MiniPlayerHeight).align(Alignment.TopEnd)
                     .clip(RoundedCornerShape(10.dp))
+                    // A focus target of its own: D-pad up from the guide
+                    // column reaches it, and Select expands it.
+                    .border(
+                        if (miniFocused) 3.dp else 0.dp,
+                        if (miniFocused) Focus else Color.Transparent,
+                        RoundedCornerShape(10.dp),
+                    )
+                    .clickable(interactionSource = miniInteraction, indication = null) { onExpand?.invoke() }
             else if (overlayLevel == 2)
                 Modifier.padding(24.dp).size(360.dp, 203.dp).align(Alignment.TopEnd)
                     .clip(RoundedCornerShape(10.dp))
