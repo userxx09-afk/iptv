@@ -702,8 +702,16 @@ fun BrowseScreen(
                 // The target row may be off screen (LazyColumn only composes
                 // what is visible), and a row that is not composed has no
                 // focus requester to find.
+                // With no particular channel wanted, the TOP row is the target -
+                // and it must be scrolled back into view first: this list is
+                // one shared scroll state, so after browsing a long category
+                // (or sitting on the channel last watched deep in "All") the
+                // top row is not composed, has no focus requester to find,
+                // and Right/Select into the list silently did nothing. That
+                // is why it worked from "All" (the wanted channel was on
+                // screen) but not from most other categories.
                 val idx = shown.indexOfFirst { it.id == channelFocusId }
-                if (idx >= 0) runCatching { listState.scrollToItem(idx) }
+                runCatching { listState.scrollToItem(if (idx >= 0) idx else 0) }
                 requestFocusRetrying(firstChannelFocus)
             }
             else -> {}
@@ -827,7 +835,10 @@ fun BrowseScreen(
     // Scrolls the channel list so the channel that was playing is on screen.
     LaunchedEffect(shown, initialChannelId) {
         val idx = shown.indexOfFirst { it.id == initialChannelId }
-        if (idx >= 0) runCatching { listState.scrollToItem(idx) }
+        // Not in this list: start from the top rather than wherever the
+        // previous list happened to be scrolled to (which, for a shorter list,
+        // clamps to its far end and hides the first rows).
+        runCatching { listState.scrollToItem(if (idx >= 0) idx else 0) }
     }
 
     // Walks the browse state to the channel being watched, one step per
