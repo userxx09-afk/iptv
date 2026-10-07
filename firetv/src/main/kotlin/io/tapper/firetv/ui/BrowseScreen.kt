@@ -295,15 +295,33 @@ fun BrowseScreen(
     // See NavPreview above. Starts at KIND to match the pre-existing default
     // (the country column already always previewed the initial kind).
     var navPreview by remember(catalogue.sourceId) { mutableStateOf(NavPreview.KIND) }
+    // The kind row the NAV list is highlighting right now, which `kind` (what
+    // the columns to its right actually show) only catches up to once the
+    // highlight has rested for a moment. Switching `kind` re-derives
+    // everything downstream of it - country groups, category counts, the
+    // channel list - over tens of thousands of items on the main thread, and
+    // doing that for every row passed over while arrowing down the menu was
+    // the little stall at Live TV / Movies / Shows. Enter (Right) reads this,
+    // not `kind`, so it never acts on a stale one.
+    var navFocusedKind by remember(catalogue.sourceId) { mutableStateOf(kind) }
+    LaunchedEffect(navFocusedKind) {
+        if (navFocusedKind == kind) return@LaunchedEffect
+        delay(180)
+        if (navPreview == NavPreview.KIND) kind = navFocusedKind
+    }
 
     val section = catalogue.section(kind)
     val pinned = remember(revision) { favorites.pinnedCountries() }
     // Capped at 15 per the request that started this - a "Recently Watched"
     // rail is meant as a shortcut back to what was on, not a second full
     // history browser.
+    val idIndexCache = remember(catalogue) { HashMap<ContentKind, Map<String, Channel>>() }
     val recentChannels = remember(section, recentItemIds) {
         if (recentItemIds.isEmpty()) emptyList() else {
-            val byId = section?.items?.associateBy { it.id } ?: emptyMap()
+            // Indexing a whole section by id is O(items) - tens of thousands
+            // for Movies - so it is kept per kind rather than redone every
+            // time that kind comes back into view.
+            val byId = idIndexCache.getOrPut(kind) { section?.items?.associateBy { it.id } ?: emptyMap() }
             recentItemIds.mapNotNull { byId[it] }.distinctBy { it.id }.take(15)
         }
     }
@@ -469,8 +487,15 @@ fun BrowseScreen(
         // is left alone - it's already ordered by what was watched most
         // recently, and pinning shouldn't override that. sortedBy is stable,
         // so everything else keeps its existing order, pinned or not.
+        // partition, not sortedBy: sortedBy re-runs its selector (building a
+        // string and hashing it) on every comparison - n log n of them over a
+        // list that can be the whole of Movies - where this builds each
+        // item's key once. Same result: pinned first, otherwise stable.
         if (historySelected || pinnedChannelIds.isEmpty()) unique
-        else unique.sortedBy { "${it.sourceId}|${it.id}" !in pinnedChannelIds }
+        else {
+            val (pins, others) = unique.partition { "${it.sourceId}|${it.id}" in pinnedChannelIds }
+            pins + others
+        }
     }
     // "Ungrouped" is the byCountry bucket's own label for "no country token
     // found" - correct as an internal name for that bucket, but it reads as
@@ -767,7 +792,10 @@ fun BrowseScreen(
         if (e.key != Key.DirectionRight) return@onKeyEvent false
         when (navPreview) {
             NavPreview.KIND -> {
-                if (e.type == KeyEventType.KeyUp) enterKind(kind)
+                // navFocusedKind, not kind: kind trails the highlight by a
+                // short debounce (see navFocusedKind) and may not have
+                // caught up yet if Right is pressed straight after Down.
+                if (e.type == KeyEventType.KeyUp) enterKind(navFocusedKind)
                 true
             }
             // Same landing as clicking My List (see its NAV row below): the
@@ -1173,7 +1201,7 @@ fun BrowseScreen(
                             // visible at this depth) updates live instead,
                             // exactly like arrowing through countries already
                             // updates the category rail next to it.
-                            onFocused = { myListActive = false; kind = k; navPreview = NavPreview.KIND },
+                            onFocused = { myListActive = false; navFocusedKind = k; navPreview = NavPreview.KIND },
                             // See enterKind above for exactly where this
                             // lands - a Home if one's configured, otherwise
                             // straight to the category rail for a kind with
