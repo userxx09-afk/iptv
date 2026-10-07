@@ -38,7 +38,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import io.tapper.core.model.Channel
 import io.tapper.core.model.ContentKind
 import io.tapper.firetv.R
@@ -315,13 +317,27 @@ fun BrowseScreen(
     // Capped at 15 per the request that started this - a "Recently Watched"
     // rail is meant as a shortcut back to what was on, not a second full
     // history browser.
-    val idIndexCache = remember(catalogue) { HashMap<ContentKind, Map<String, Channel>>() }
+    val idIndexCache = remember(catalogue) { java.util.concurrent.ConcurrentHashMap<ContentKind, Map<String, Channel>>() }
+    // Built in the background shortly after the catalogue arrives, so the
+    // first visit to each kind finds it ready instead of indexing a whole
+    // section on the main thread at that moment.
+    LaunchedEffect(catalogue) {
+        delay(1500)
+        withContext(Dispatchers.Default) {
+            for (k in catalogue.availableKinds) {
+                if (!idIndexCache.containsKey(k)) {
+                    idIndexCache[k] = catalogue.section(k)?.items?.associateBy { it.id } ?: emptyMap()
+                }
+            }
+        }
+    }
     val recentChannels = remember(section, recentItemIds) {
         if (recentItemIds.isEmpty()) emptyList() else {
             // Indexing a whole section by id is O(items) - tens of thousands
             // for Movies - so it is kept per kind rather than redone every
             // time that kind comes back into view.
-            val byId = idIndexCache.getOrPut(kind) { section?.items?.associateBy { it.id } ?: emptyMap() }
+            val byId = idIndexCache[kind]
+                ?: (section?.items?.associateBy { it.id } ?: emptyMap()).also { idIndexCache[kind] = it }
             recentItemIds.mapNotNull { byId[it] }.distinctBy { it.id }.take(15)
         }
     }
@@ -451,12 +467,36 @@ fun BrowseScreen(
                 // in the reused-section branch above and in the channel
                 // filter below - a mismatch here used to mean a category row
                 // could show a real count and then filter to nothing.
-                channelsInCountry.flatMap { c -> c.categories.ifEmpty { listOfNotNull(c.group) }.distinct() }
-                    .groupingBy { it }.eachCount()
+                // A plain counting loop: the flatMap/distinct() version built
+                // two or three throwaway lists per channel, which for a
+                // country with thousands of channels was a lot of garbage on
+                // every country highlighted.
+                val m = HashMap<String, Int>()
+                for (c in channelsInCountry) {
+                    val cats = c.categories
+                    when {
+                        cats.isEmpty() -> c.group?.let { m[it] = (m[it] ?: 0) + 1 }
+                        cats.size == 1 -> cats[0].let { m[it] = (m[it] ?: 0) + 1 }
+                        else -> for (k in cats.distinct()) m[k] = (m[k] ?: 0) + 1
+                    }
+                }
+                m
             }
+        // The sort key is worked out ONCE per category, not inside the
+        // comparator. categoryRank runs a regex (plus trim/uppercase) and the
+        // name tiebreak lowercases the string; done per comparison that is
+        // tens of thousands of regex matches for a Movies list with a couple
+        // of thousand categories - the multi-second stall on switching to
+        // Movies/Shows.
+        val rank = HashMap<String, Int>(counts.size * 2)
+        val lower = HashMap<String, String>(counts.size * 2)
+        for (k in counts.keys) {
+            rank[k] = if (k in pinnedCategories) -1 else categoryRank(k, kind)
+            lower[k] = k.lowercase()
+        }
         counts.entries.sortedWith(
-            compareBy<Map.Entry<String, Int>> { if (it.key in pinnedCategories) -1 else categoryRank(it.key, kind) }
-                .thenBy { it.key.lowercase() }
+            compareBy<Map.Entry<String, Int>> { rank.getValue(it.key) }
+                .thenBy { lower.getValue(it.key) }
         )
     }
     val baseChannels = if (myListActive) myListChannels else channelsInCountry
@@ -482,19 +522,26 @@ fun BrowseScreen(
         // it throws - and only once both copies are composed at the same time,
         // which is why it surfaced when scrolling back to the top rather than
         // on first display.
-        val unique = filtered.distinctBy { it.id }
+        // Every list that reaches here (a section's groups, History, My List)
+        // was already de-duplicated by id when it was built, so for the big
+        // ones this pass is pure cost - a full hash of the whole of Movies on
+        // every kind switch. It stays for small lists, where it is free.
+        val unique = if (filtered.size <= 3000) filtered.distinctBy { it.id } else filtered
         // Pinned channels float to the top of whatever list this is. History
         // is left alone - it's already ordered by what was watched most
-        // recently, and pinning shouldn't override that. sortedBy is stable,
-        // so everything else keeps its existing order, pinned or not.
-        // partition, not sortedBy: sortedBy re-runs its selector (building a
-        // string and hashing it) on every comparison - n log n of them over a
-        // list that can be the whole of Movies - where this builds each
-        // item's key once. Same result: pinned first, otherwise stable.
+        // recently, and pinning shouldn't override that. Everything else
+        // keeps its existing order, pinned or not.
         if (historySelected || pinnedChannelIds.isEmpty()) unique
         else {
-            val (pins, others) = unique.partition { "${it.sourceId}|${it.id}" in pinnedChannelIds }
-            pins + others
+            // Cheap id-only test first (String hashes are cached), the full
+            // "source|id" key only for the rare hit - building that string for
+            // every item of a 100k-item list was most of this cost.
+            val pinIds = HashSet<String>()
+            for (k in pinnedChannelIds) pinIds.add(k.substringAfter('|'))
+            val (pins, others) = unique.partition {
+                it.id in pinIds && "${it.sourceId}|${it.id}" in pinnedChannelIds
+            }
+            if (pins.isEmpty()) unique else pins + others
         }
     }
     // "Ungrouped" is the byCountry bucket's own label for "no country token
@@ -959,6 +1006,13 @@ fun BrowseScreen(
                     channel = ch,
                     favorite = isFav,
                     pinned = isPinnedCh,
+                    // Every visible row scrolls only while this list is the
+                    // narrow preview beside the category rail (nothing in it
+                    // has focus there). Once it is the list being browsed,
+                    // just the focused row does: a dozen permanent marquees on
+                    // long movie titles kept the Fire TV redrawing constantly
+                    // and made scrolling sluggish.
+                    scrollAll = depth == Depth.CATEGORY,
                     modifier = if (if (focusRowId != null) ch.id == focusRowId else i == 0)
                         Modifier.focusRequester(firstChannelFocus) else Modifier,
                     onFocused = {
@@ -1552,6 +1606,7 @@ private fun ChannelRow(
     channel: Channel,
     favorite: Boolean,
     pinned: Boolean = false,
+    scrollAll: Boolean = false,
     programme: EpgDatabase.Programme?,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit,
@@ -1600,9 +1655,9 @@ private fun ChannelRow(
             // (basicMarquee's default stops after 3 passes).
             Text(channel.name, style = MaterialTheme.typography.bodyLarge, color = Ink,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.basicMarquee(
+                modifier = if (scrollAll || focused) Modifier.basicMarquee(
                     iterations = Int.MAX_VALUE, initialDelayMillis = 800, repeatDelayMillis = 1500,
-                ))
+                ) else Modifier)
             // Guide line when it exists, otherwise the category - never blank,
             // so rows keep a consistent height whether or not EPG has loaded.
             Text(
@@ -1610,9 +1665,9 @@ private fun ChannelRow(
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (programme != null) Focus else Dim,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.basicMarquee(
+                modifier = if (scrollAll || focused) Modifier.basicMarquee(
                     iterations = Int.MAX_VALUE, initialDelayMillis = 800, repeatDelayMillis = 1500,
-                ),
+                ) else Modifier,
             )
         }
         if (pinned) {
