@@ -458,8 +458,22 @@ class MainActivity : ComponentActivity() {
                 return EpgDatabase.normalizeId(if (!override.isNullOrBlank()) override else ch.epgChannelId)
             }
 
-            fun channelForEpgId(epgId: String): Channel? =
-                catalogue?.channels?.firstOrNull { epgIdFor(it) == epgId }
+            // One lookup table per catalogue/override change instead of a scan
+            // over every channel (tens of thousands, each running epgIdFor)
+            // for every single guide hit - search resolves up to 60 of those
+            // at a time, which is what made it lock up. `lazy` so nothing is
+            // built until a search actually asks, and so that first ask can
+            // be made from a background thread. First channel wins on a
+            // shared id, exactly as the firstOrNull scan did.
+            val epgChannelIndex = remember(catalogue, epgOverrideRevision) {
+                lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+                    val m = HashMap<String, Channel>()
+                    catalogue?.channels?.forEach { m.putIfAbsent(epgIdFor(it), it) }
+                    m
+                }
+            }
+
+            fun channelForEpgId(epgId: String): Channel? = epgChannelIndex.value[epgId]
 
             TapperTheme {
                 val p = playing
