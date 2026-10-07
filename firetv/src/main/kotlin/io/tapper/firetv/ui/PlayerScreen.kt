@@ -392,9 +392,13 @@ fun PlayerScreen(
                         // expanded guide above.
                         Key.DirectionUp, Key.ChannelUp, Key.PageUp -> { previewStep(-1); true }
                         Key.DirectionDown, Key.ChannelDown, Key.PageDown -> { previewStep(1); true }
-                        // Steps out to the fuller category browser, carrying
-                        // the same preview forward rather than resetting it.
-                        Key.DirectionLeft -> { overlayLevel = 2; true }
+                        // Steps out to the real browse screen when there is one
+                        // to step out to (see the plain-playback Left below);
+                        // the old in-player category browser otherwise.
+                        Key.DirectionLeft -> {
+                            if (onMinimize != null) { overlayLevel = 0; onMinimize() } else overlayLevel = 2
+                            true
+                        }
                         Key.DirectionCenter, Key.Enter -> { commitPreview(); true }
                         else -> false
                     }
@@ -415,8 +419,19 @@ fun PlayerScreen(
                     Key.DirectionDown ->
                         if (channel.kind == ContentKind.LIVE) { openGuide(1); true }
                         else { showControls = true; true }
+                    // Left drops the picture into the corner and lands on the
+                    // real browse screen at this channel - the same place Back
+                    // goes - so Left/Right then move between its category,
+                    // channel and guide columns like everywhere else. The
+                    // in-player category browser (level 2) only cycles
+                    // categories with Left/Right, which is not that; it stays
+                    // as the fallback for a stream that has no browse screen
+                    // behind it (started from Search, say).
                     Key.DirectionLeft ->
-                        if (channel.kind == ContentKind.LIVE) { openGuide(2); true } else false
+                        if (channel.kind == ContentKind.LIVE) {
+                            if (onMinimize != null) onMinimize() else openGuide(2)
+                            true
+                        } else false
                     Key.DirectionCenter, Key.Enter ->
                         if (channel.kind == ContentKind.LIVE) { overlayVisible = !overlayVisible; true }
                         else { showControls = true; true }
