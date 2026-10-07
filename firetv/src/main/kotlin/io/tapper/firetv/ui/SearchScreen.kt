@@ -145,7 +145,6 @@ fun SearchScreen(
     onExit: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    var programmes by remember { mutableStateOf<List<EpgDatabase.Programme>>(emptyList()) }
     var revision by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
     val focus = remember { FocusRequester() }
