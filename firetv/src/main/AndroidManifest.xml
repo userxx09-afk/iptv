@@ -29,6 +29,14 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- Lets the Search screen check whether a speech-recognition service is
+         installed (package visibility, Android 11+) before offering "Speak". -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
     <application
         android:name=".TapperApp"
         android:allowBackup="false"
