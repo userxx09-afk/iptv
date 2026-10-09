@@ -1,6 +1,19 @@
 package io.tapper.firetv.ui
 
+import android.content.Intent
+import android.speech.RecognizerIntent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -129,6 +142,7 @@ private suspend fun runChannelSearch(idx: SearchIndex, query: String): ChannelHi
  * are not searchable yet - they need Xtream's VOD and series endpoints, which
  * this build does not implement.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun SearchScreen(
     channels: List<Channel>,
@@ -148,7 +162,35 @@ fun SearchScreen(
     var revision by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
     val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
+    // Focusing a Compose text field does not by itself bring up the system
+    // keyboard on a TV, and without a live keyboard session the remote's
+    // voice button is handled by Alexa instead of dictating into the field.
+    // Showing the keyboard explicitly keeps the field attached to the input
+    // method, which is what lets the voice button dictate into it.
+    LaunchedEffect(Unit) {
+        runCatching { focus.requestFocus() }
+        delay(300)
+        keyboard?.show()
+    }
+
+    // Optional "Speak" button for devices that have a speech-recognition
+    // service installed. Hidden when none is available.
+    val speechIntent = remember {
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Say a channel or show")
+        }
+    }
+    val speechAvailable = remember {
+        runCatching { speechIntent.resolveActivity(context.packageManager) != null }.getOrDefault(false)
+    }
+    val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val spoken = r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (!spoken.isNullOrBlank()) query = spoken.trim()
+    }
 
     // Without this the search screen is a dead end: Back would finish the
     // Activity and drop the user out of the app entirely.
@@ -195,8 +237,9 @@ fun SearchScreen(
         Text("Search", style = MaterialTheme.typography.headlineLarge, color = Ink)
         Spacer(Modifier.height(16.dp))
 
+        Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
-            Modifier.fillMaxWidth()
+            Modifier.weight(1f)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color.White.copy(alpha = 0.06f))
                 .border(1.dp, Focus.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
@@ -212,8 +255,23 @@ fun SearchScreen(
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = Ink),
                 cursorBrush = SolidColor(Focus),
-                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                // Done/Search on the keyboard (or a finished dictation) closes
+                // it and drops focus to the results.
+                keyboardActions = KeyboardActions(onSearch = {
+                    keyboard?.hide()
+                    focusManager.moveFocus(FocusDirection.Down)
+                }),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus)
+                    .onFocusChanged { if (it.isFocused) keyboard?.show() },
             )
+        }
+        if (speechAvailable) {
+            Spacer(Modifier.width(12.dp))
+            Chip("Speak", false) {
+                runCatching { speechLauncher.launch(speechIntent) }
+            }
+        }
         }
 
         Spacer(Modifier.height(20.dp))
