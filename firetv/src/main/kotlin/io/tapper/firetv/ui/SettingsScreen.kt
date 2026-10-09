@@ -80,6 +80,9 @@ fun SettingsScreen(
     onSetResumeLast: (Boolean) -> Unit,
     bufferSize: BufferSize,
     onSetBufferSize: (BufferSize) -> Unit,
+    /** Hours a downloaded playlist is reused before a fresh copy is fetched. */
+    cacheHours: Int,
+    onSetCacheHours: (Int) -> Unit,
     syncSummary: String,
     syncBusy: Boolean,
     onPickFolder: () -> Unit,
@@ -548,10 +551,23 @@ fun SettingsScreen(
         Text("STORAGE", style = MaterialTheme.typography.bodyMedium, color = Dim)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Playlists and guide data are cached for 30 hours. Clearing forces a " +
-                "fresh download on the next load; saved sources and credentials are kept.",
+            "Playlists are cached for $cacheHours ${if (cacheHours == 1) "hour" else "hours"} " +
+                "(default 30) before the next load downloads a fresh copy. Clearing forces " +
+                "a fresh download immediately; saved sources and credentials are kept.",
             style = MaterialTheme.typography.bodyMedium, color = Dim,
         )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(6, 12, 24, 30, 48, 72).forEach { h ->
+                Chip("${h}h", cacheHours == h) { onSetCacheHours(h) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("- 1 hour", false) { onSetCacheHours(cacheHours - 1) }
+            Chip("+ 1 hour", false) { onSetCacheHours(cacheHours + 1) }
+            Chip("Reset to 30", cacheHours == 30) { onSetCacheHours(30) }
+        }
         Spacer(Modifier.height(10.dp))
         Chip("Clear cached playlists", false) {
             onClearCache()
