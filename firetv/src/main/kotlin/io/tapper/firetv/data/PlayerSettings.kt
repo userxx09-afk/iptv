@@ -55,4 +55,16 @@ class PlayerSettingsStore(context: Context) {
         get() = runCatching { BufferSize.valueOf(prefs.getString("buffer", null) ?: "") }
             .getOrDefault(BufferSize.MEDIUM)
         set(v) = prefs.edit().putString("buffer", v.name).apply()
+
+    /** How long a downloaded playlist is reused before the next load fetches
+     *  a fresh copy, in hours. Set from Settings > Storage. */
+    var cacheHours: Int
+        get() = prefs.getInt("cache_hours", DEFAULT_CACHE_HOURS).coerceIn(MIN_CACHE_HOURS, MAX_CACHE_HOURS)
+        set(v) = prefs.edit().putInt("cache_hours", v.coerceIn(MIN_CACHE_HOURS, MAX_CACHE_HOURS)).apply()
+
+    companion object {
+        const val DEFAULT_CACHE_HOURS = 30
+        const val MIN_CACHE_HOURS = 1
+        const val MAX_CACHE_HOURS = 720
+    }
 }

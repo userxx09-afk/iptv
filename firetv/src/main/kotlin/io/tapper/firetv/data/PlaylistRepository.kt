@@ -34,9 +34,12 @@ class PlaylistRepository(
      *  that genuinely has no category/country breakdown. */
     private val onWarning: (String) -> Unit = {},
 ) {
-    companion object {
-        private const val CACHE_MAX_AGE_MS = 30 * 60 * 60 * 1000L
-    }
+    /** Hours a cached playlist counts as fresh - user-adjustable in
+     *  Settings > Storage (see PlayerSettingsStore.cacheHours), 30 by default.
+     *  Read on every load, so a change applies to the very next one. */
+    @Volatile var cacheMaxAgeHours: Int = 30
+
+    private val CACHE_MAX_AGE_MS: Long get() = cacheMaxAgeHours * 60L * 60L * 1000L
 
     /** One entry in a browse rail. */
     data class Group(val key: String?, val label: String, val channels: List<Channel>)
