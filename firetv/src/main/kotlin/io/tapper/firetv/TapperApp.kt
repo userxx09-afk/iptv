@@ -120,6 +120,7 @@ class TapperApp : Application() {
         watch = WatchStore(this)
         sync = WatchSync(this, watch)
         playerSettings = PlayerSettingsStore(this)
+        repository.cacheMaxAgeHours = playerSettings.cacheHours
         navHome = NavHomeStore(this)
         movieMetadata = MovieMetadataStore(this, onError = { msg -> logEvent("TMDB", msg) })
 

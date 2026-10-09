@@ -22,6 +22,7 @@ import io.tapper.core.model.ContentKind
 import io.tapper.core.model.StreamRef
 import io.tapper.core.xtream.XtreamClient
 import io.tapper.firetv.data.BufferSize
+import io.tapper.firetv.data.PlayerSettingsStore
 import io.tapper.firetv.data.EpgDatabase
 import io.tapper.firetv.data.LogoFolderResolver
 import io.tapper.firetv.data.PlaylistRepository
@@ -179,6 +180,7 @@ class MainActivity : ComponentActivity() {
             // next cross-device sync.
             var watchRevision by remember { mutableIntStateOf(0) }
             var bufferSize by remember { mutableStateOf(app.playerSettings.bufferSize) }
+            var cacheHours by remember { mutableStateOf(app.playerSettings.cacheHours) }
             var episodes by remember { mutableStateOf<List<Channel>>(emptyList()) }
             var episodesLoading by remember { mutableStateOf(false) }
             var episodesError by remember { mutableStateOf<String?>(null) }
@@ -782,6 +784,13 @@ class MainActivity : ComponentActivity() {
                         bufferSize = bufferSize,
                         onSetBufferSize = {
                             bufferSize = it; app.playerSettings.bufferSize = it
+                        },
+                        cacheHours = cacheHours,
+                        onSetCacheHours = {
+                            val h = it.coerceIn(PlayerSettingsStore.MIN_CACHE_HOURS, PlayerSettingsStore.MAX_CACHE_HOURS)
+                            cacheHours = h
+                            app.playerSettings.cacheHours = h
+                            app.repository.cacheMaxAgeHours = h
                         },
                         syncSummary = syncSummary,
                         syncBusy = syncBusy,
