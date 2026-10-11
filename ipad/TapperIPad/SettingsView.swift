@@ -13,6 +13,8 @@ struct SettingsView: View {
     let onDismiss: () -> Void
 
     @State private var buffer = PlayerSettingsStore.shared.bufferSize
+    @State private var tmdbKey = MovieMetadataStore.shared.apiKey
+    @State private var infoCleared = false
     @ObservedObject private var startup = StartupStore.shared
     @State private var resumeLast = StartupStore.shared.resumeLast
     @State private var startTab = StartupStore.shared.startTab
@@ -107,6 +109,37 @@ struct SettingsView: View {
                     Text("Starting points")
                 } footer: {
                     Text("A starting point is the country and category a list opens on. Choose the country and category you want in a list, then tap the \u{22EF} button beside them and \"Make this my starting point\".")
+                }
+
+                Section {
+                    TextField("TMDb API key or token", text: $tmdbKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(.body, design: .monospaced))
+                        .onChange(of: tmdbKey) { _, newValue in
+                            MovieMetadataStore.shared.apiKey = newValue
+                        }
+                    if tmdbKey != MovieMetadataStore.builtInKey {
+                        Button("Use the built-in key") {
+                            MovieMetadataStore.shared.resetToBuiltInKey()
+                            tmdbKey = MovieMetadataStore.shared.apiKey
+                        }
+                    }
+                    if !tmdbKey.isEmpty {
+                        Button("Remove key", role: .destructive) {
+                            tmdbKey = ""
+                        }
+                    }
+                    Button(infoCleared ? "Saved info cleared" : "Clear saved info") {
+                        Task {
+                            await MovieMetadataStore.shared.clearCache()
+                            infoCleared = true
+                        }
+                    }
+                } header: {
+                    Text("Movie & show info")
+                } footer: {
+                    Text("Posters, synopses and ratings come from TMDb and show when you open a movie or a show. Get a free key at themoviedb.org/settings/api - either the API Key or the Read Access Token works. This product uses the TMDB API but is not endorsed or certified by TMDB.")
                 }
 
                 Section {

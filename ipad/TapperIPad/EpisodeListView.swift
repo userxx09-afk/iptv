@@ -21,31 +21,39 @@ struct EpisodeListView: View {
     @State private var playingEpisode: Channel?
 
     var body: some View {
-        Group {
-            if isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if episodes.isEmpty {
-                Text("No episodes found for this show.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(episodes, id: \.id) { episode in
-                    Button {
-                        playingEpisode = episode
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(episode.name)
-                                .font(.body)
-                                .foregroundStyle(episode.isPlayable ? Color.primary : Color.secondary)
-                            if let group = episode.group {
-                                Text(group)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+        List {
+            // Poster, synopsis and rating from TMDb above the episodes.
+            Section {
+                TitleInfoBlock(name: seriesItem.name, isShow: true)
+            }
+
+            Section("Episodes") {
+                if isLoading {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Loading episodes...").foregroundStyle(.secondary)
+                    }
+                } else if episodes.isEmpty {
+                    Text("No episodes found for this show.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(episodes, id: \.id) { episode in
+                        Button {
+                            playingEpisode = episode
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(episode.name)
+                                    .font(.body)
+                                    .foregroundStyle(episode.isPlayable ? Color.primary : Color.secondary)
+                                if let group = episode.group {
+                                    Text(group)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
+                        .disabled(!episode.isPlayable)
                     }
-                    .disabled(!episode.isPlayable)
                 }
             }
         }

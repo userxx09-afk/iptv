@@ -65,12 +65,12 @@ struct ContentView: View {
     /// screen.
     private var searchGroups: [SearchGroup] {
         if !playlistLoader.channels.isEmpty {
-            return [SearchGroup(title: "Channels", channels: playlistLoader.channels)]
+            return [SearchGroup(title: "Channels", channels: playlistLoader.channels, namespace: "playlist")]
         }
         return [
-            SearchGroup(title: "Live TV", channels: xtreamLoader.liveChannels),
-            SearchGroup(title: "Movies", channels: xtreamLoader.movies),
-            SearchGroup(title: "Shows", channels: xtreamLoader.series),
+            SearchGroup(title: "Live TV", channels: xtreamLoader.liveChannels, namespace: "live"),
+            SearchGroup(title: "Movies", channels: xtreamLoader.movies, namespace: "movie"),
+            SearchGroup(title: "Shows", channels: xtreamLoader.series, namespace: "series"),
         ]
     }
 
@@ -486,30 +486,45 @@ struct ContentView: View {
     // same function serves Live, Movies and the M3U playlist list, and this
     // avoids relying on how a Kotlin enum bridges into Swift for something
     // that's purely a UserDefaults storage key here.
+    private func channelRowLabel(_ channel: Channel) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(channel.name)
+                .font(.body)
+                .foregroundStyle(channel.isPlayable ? Color.primary : Color.secondary)
+            if let group = channel.group {
+                Text(group)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func channelList(_ channels: [Channel], namespace: String) -> some View {
         CategoryFilteredList(channels: channels, categoryNamespace: namespace) { channel in
             HStack {
-                Button {
-                    // Remembered for "Resume the last channel" - live
-                    // channels only; a film or episode is not something to
-                    // jump back into at launch.
-                    if namespace == "live" || namespace == "playlist" {
-                        StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: channel.id)
+                if namespace == "movie" {
+                    // A film opens its detail screen (poster, synopsis,
+                    // rating from TMDb) with Play on it, rather than
+                    // starting at once.
+                    NavigationLink {
+                        MovieDetailView(channel: channel, onPlay: { playingChannel = $0 })
+                    } label: {
+                        channelRowLabel(channel)
                     }
-                    playingChannel = channel
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(channel.name)
-                            .font(.body)
-                            .foregroundStyle(channel.isPlayable ? Color.primary : Color.secondary)
-                        if let group = channel.group {
-                            Text(group)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                } else {
+                    Button {
+                        // Remembered for "Resume the last channel" - live
+                        // channels only; a film or episode is not something
+                        // to jump back into at launch.
+                        if namespace == "live" || namespace == "playlist" {
+                            StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: channel.id)
                         }
+                        playingChannel = channel
+                    } label: {
+                        channelRowLabel(channel)
                     }
+                    .disabled(!channel.isPlayable)
                 }
-                .disabled(!channel.isPlayable)
                 Spacer()
                 FavoriteButton(sourceId: channel.sourceId, channelId: channel.id)
             }

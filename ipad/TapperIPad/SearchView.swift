@@ -8,6 +8,9 @@ import TapperCore
 struct SearchGroup {
     let title: String
     let channels: [Channel]
+    /// "live", "movie", "series" or "playlist" - a movie result opens its
+    /// detail screen rather than playing straight away.
+    var namespace: String = ""
 }
 
 /// The iPad counterpart to Fire TV's SearchScreen: one search box across
@@ -63,7 +66,7 @@ struct SearchView: View {
                     ForEach(results) { section in
                         Section {
                             ForEach(Array(section.shown.enumerated()), id: \.offset) { _, channel in
-                                row(channel)
+                                row(channel, namespace: section.namespace)
                             }
                         } header: {
                             Text(header(for: section))
@@ -114,11 +117,17 @@ struct SearchView: View {
     // everything else plays. The star sits outside the row's own button so
     // starring a result doesn't also open or play it.
     @ViewBuilder
-    private func row(_ channel: Channel) -> some View {
+    private func row(_ channel: Channel, namespace: String) -> some View {
         HStack {
             if channel.seriesId != nil {
                 NavigationLink {
                     EpisodeListView(loader: loader, seriesItem: channel)
+                } label: {
+                    rowLabel(channel)
+                }
+            } else if namespace == "movie" {
+                NavigationLink {
+                    MovieDetailView(channel: channel, onPlay: { playing = $0 })
                 } label: {
                     rowLabel(channel)
                 }
@@ -177,6 +186,7 @@ struct SearchResultSection: Identifiable {
     let title: String
     let shown: [Channel]
     let total: Int
+    var namespace: String = ""
 }
 
 /// Pre-lowercased names, one array per group, so a search is a single pass
@@ -187,6 +197,7 @@ struct SearchIndex {
 
     private struct Part {
         let title: String
+        let namespace: String
         let channels: [Channel]
         let names: [String]
     }
@@ -197,7 +208,7 @@ struct SearchIndex {
 
     static func build(_ groups: [SearchGroup]) -> SearchIndex {
         SearchIndex(parts: groups.map { group in
-            Part(title: group.title, channels: group.channels, names: group.channels.map { $0.name.lowercased() })
+            Part(title: group.title, namespace: group.namespace, channels: group.channels, names: group.channels.map { $0.name.lowercased() })
         })
     }
 
@@ -229,7 +240,7 @@ struct SearchIndex {
             }
             if total > 0 {
                 let shown = Array((buckets[0] + buckets[1] + buckets[2]).prefix(SearchIndex.perGroupCap))
-                out.append(SearchResultSection(id: partIndex, title: part.title, shown: shown, total: total))
+                out.append(SearchResultSection(id: partIndex, title: part.title, shown: shown, total: total, namespace: part.namespace))
             }
         }
         return out
