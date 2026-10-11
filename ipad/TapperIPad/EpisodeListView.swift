@@ -80,18 +80,34 @@ struct EpisodeListView: View {
                         Button {
                             playingEpisode = episode
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(episode.name)
-                                    .font(.body)
-                                    .foregroundStyle(episode.isPlayable ? Color.primary : Color.secondary)
-                                if let group = episode.group {
-                                    Text(group)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(episode.name)
+                                        .font(.body)
+                                        .foregroundStyle(episode.isPlayable ? Color.primary : Color.secondary)
+                                    if let group = episode.group {
+                                        Text(group)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+                                Spacer()
+                                WatchBadge(channelId: episode.id)
                             }
                         }
                         .disabled(!episode.isPlayable)
+                        .contextMenu {
+                            Button {
+                                WatchStore.shared.setWatched(channel: episode, series: seriesItem, watched: true)
+                            } label: {
+                                Label("Mark as watched", systemImage: "checkmark.circle")
+                            }
+                            Button {
+                                WatchStore.shared.setWatched(channel: episode, series: seriesItem, watched: false)
+                            } label: {
+                                Label("Mark as unwatched", systemImage: "eye.slash")
+                            }
+                        }
                     }
                 }
             }
@@ -109,7 +125,7 @@ struct EpisodeListView: View {
             }
         }
         .fullScreenCover(item: $playingEpisode) { episode in
-            PlayerView(channel: episode)
+            PlayerView(channel: episode, seriesItem: seriesItem)
         }
     }
 }

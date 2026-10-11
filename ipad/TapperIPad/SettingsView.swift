@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var buffer = PlayerSettingsStore.shared.bufferSize
     @State private var tmdbKey = MovieMetadataStore.shared.apiKey
     @State private var infoCleared = false
+    @State private var confirmClearWatch = false
     @ObservedObject private var startup = StartupStore.shared
     @State private var resumeLast = StartupStore.shared.resumeLast
     @State private var startTab = StartupStore.shared.startTab
@@ -155,6 +156,16 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Button("Clear watch history", role: .destructive) {
+                        confirmClearWatch = true
+                    }
+                } header: {
+                    Text("Watch history")
+                } footer: {
+                    Text("Films and episodes remember where you stopped, and show under Continue. This clears all of it.")
+                }
+
+                Section {
                     Picker("Buffering", selection: $buffer) {
                         ForEach(BufferSize.allCases) { size in
                             Text(size.label).tag(size)
@@ -200,6 +211,9 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog("Clear all watch history?", isPresented: $confirmClearWatch, titleVisibility: .visible) {
+                Button("Clear", role: .destructive) { WatchStore.shared.clearAll() }
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: onDismiss)

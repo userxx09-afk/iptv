@@ -34,6 +34,7 @@ struct SearchView: View {
     @State private var results: [SearchResultSection] = []
     @State private var searching = false
     @State private var playing: Channel?
+    @State private var playingLive = false
     @State private var programmeHits: [ProgrammeHit] = []
     @State private var guideChannel: Channel?
 
@@ -114,14 +115,17 @@ struct SearchView: View {
             await runSearch()
         }
         .fullScreenCover(item: $playing) { channel in
-            PlayerView(channel: channel)
+            PlayerView(channel: channel, isLive: playingLive)
         }
         .sheet(item: $guideChannel) { channel in
             ChannelGuideView(
                 channel: channel,
                 onPlay: { picked in
                     guideChannel = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { playing = picked }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        playingLive = true
+                        playing = picked
+                    }
                 },
                 onClose: { guideChannel = nil }
             )
@@ -137,6 +141,7 @@ struct SearchView: View {
         Button {
             guard let channel = hit.channel else { return }
             if airing && channel.isPlayable {
+                playingLive = true
                 playing = channel
             } else {
                 guideChannel = channel
@@ -182,12 +187,16 @@ struct SearchView: View {
                 }
             } else if namespace == "movie" {
                 NavigationLink {
-                    MovieDetailView(channel: channel, onPlay: { playing = $0 })
+                    MovieDetailView(channel: channel, onPlay: {
+                        playingLive = false
+                        playing = $0
+                    })
                 } label: {
                     rowLabel(channel)
                 }
             } else {
                 Button {
+                    playingLive = namespace == "live" || namespace == "playlist"
                     playing = channel
                 } label: {
                     rowLabel(channel)

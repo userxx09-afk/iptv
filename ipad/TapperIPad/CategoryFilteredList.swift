@@ -40,7 +40,10 @@ struct CategoryFilteredList<RowContent: View>: View {
     /// namespace, and a provider could plausibly reuse the same category
     /// name for genuinely different things in each.
     let categoryNamespace: String
-    @ViewBuilder let row: (Channel) -> RowContent
+    /// Builds one row. Gets the channel and the list as currently shown
+    /// (after country / category filtering), which the live player uses for
+    /// channel up / down.
+    @ViewBuilder let row: (Channel, [Channel]) -> RowContent
 
     @State private var selectedCategory: String?
     @State private var selectedCountry: String?
@@ -146,8 +149,9 @@ struct CategoryFilteredList<RowContent: View>: View {
                 categoryBar
                 Divider()
             }
-            List(filtered, id: \.id) { channel in
-                row(channel)
+            let shown = filtered
+            List(shown, id: \.id) { channel in
+                row(channel, shown)
             }
             // Picking a category can empty the on-screen list if that
             // category's only channel was just removed by a source switch -

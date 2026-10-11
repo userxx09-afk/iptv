@@ -47,6 +47,10 @@ struct ContentView: View {
     /// channel rows do. See PlayerView.swift for Channel's Identifiable
     /// conformance, required for `.fullScreenCover(item:)` below.
     @State private var playingChannel: Channel?
+    /// What the player is showing: live TV (custom overlay, zapping through
+    /// `playingList`) or a film / episode (native controls).
+    @State private var playingIsLive = false
+    @State private var playingList: [Channel] = []
 
     /// The live channel whose schedule is open.
     @State private var guideChannel: Channel?
@@ -125,7 +129,7 @@ struct ContentView: View {
                     // Let the sheet finish closing before the player opens.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: picked.id)
-                        playingChannel = picked
+                        play(picked, live: true)
                     }
                 },
                 onClose: { guideChannel = nil }
@@ -230,7 +234,14 @@ struct ContentView: View {
             }
         }
         .fullScreenCover(item: $playingChannel) { channel in
-            PlayerView(channel: channel)
+            PlayerView(
+                channel: channel,
+                playlist: playingList,
+                isLive: playingIsLive,
+                onZap: { zapped in
+                    StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: zapped.id)
+                }
+            )
         }
     }
 
@@ -276,8 +287,16 @@ struct ContentView: View {
                 return
             }
             AppLog.shared.log("SESSION", "Resuming \"\(channel.name)\"")
-            playingChannel = channel
+            play(channel, live: true, list: pool.filter { $0.isPlayable })
         }
+    }
+
+    /// Opens the player. For live TV, `list` is what channel up / down and
+    /// the in-player channel list cycle through.
+    private func play(_ channel: Channel, live: Bool, list: [Channel] = []) {
+        playingIsLive = live
+        playingList = list
+        playingChannel = channel
     }
 
     /// A source finished loading: hand its live channels to the guide, which
@@ -488,6 +507,9 @@ struct ContentView: View {
                 seriesList
                     .tabItem { Label("Shows", systemImage: "tv.badge.wifi") }
                     .tag(2)
+                ContinueWatchingView(loader: xtreamLoader, onPlayMovie: { play($0, live: false) })
+                    .tabItem { Label("Continue", systemImage: "clock.arrow.circlepath") }
+                    .tag(3)
             }
         }
     }
@@ -499,7 +521,7 @@ struct ContentView: View {
     // FavoriteButton sits outside the NavigationLink in its own HStack slot
     // so starring a show doesn't also push EpisodeListView.
     private var seriesList: some View {
-        CategoryFilteredList(channels: xtreamLoader.series, categoryNamespace: "series") { item in
+        CategoryFilteredList(channels: xtreamLoader.series, categoryNamespace: "series") { item, _ in
             HStack {
                 NavigationLink {
                     EpisodeListView(loader: xtreamLoader, seriesItem: item)
@@ -540,16 +562,20 @@ struct ContentView: View {
     }
 
     private func channelList(_ channels: [Channel], namespace: String) -> some View {
-        CategoryFilteredList(channels: channels, categoryNamespace: namespace) { channel in
+        CategoryFilteredList(channels: channels, categoryNamespace: namespace) { channel, shown in
             HStack {
                 if namespace == "movie" {
                     // A film opens its detail screen (poster, synopsis,
                     // rating from TMDb) with Play on it, rather than
                     // starting at once.
                     NavigationLink {
-                        MovieDetailView(channel: channel, onPlay: { playingChannel = $0 })
+                        MovieDetailView(channel: channel, onPlay: { play($0, live: false) })
                     } label: {
-                        channelRowLabel(channel)
+                        HStack(spacing: 10) {
+                            channelRowLabel(channel)
+                            Spacer()
+                            WatchBadge(channelId: channel.id)
+                        }
                     }
                 } else {
                     let isLive = namespace == "live" || namespace == "playlist"
@@ -560,7 +586,7 @@ struct ContentView: View {
                         if isLive {
                             StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: channel.id)
                         }
-                        playingChannel = channel
+                        play(channel, live: isLive, list: isLive ? shown : [])
                     } label: {
                         if isLive {
                             // What is on now, from the guide.

@@ -146,6 +146,8 @@ struct MovieDetailView: View {
     let channel: Channel
     let onPlay: (Channel) -> Void
 
+    @ObservedObject private var watch = WatchStore.shared
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -157,20 +159,55 @@ struct MovieDetailView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                let progress = watch.entry(channelId: channel.id)
+                let resumable = progress.map { !$0.isComplete && $0.positionSec >= 30 } ?? false
+
                 HStack(spacing: 18) {
                     Button {
                         onPlay(channel)
                     } label: {
-                        Label("Play", systemImage: "play.fill")
+                        Label(resumable ? "Resume" : "Play", systemImage: "play.fill")
                             .frame(minWidth: 120)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(!channel.isPlayable)
 
+                    if resumable {
+                        Button {
+                            watch.removeEntry(channelId: channel.id)
+                            onPlay(channel)
+                        } label: {
+                            Label("Start over", systemImage: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .disabled(!channel.isPlayable)
+                    }
+
                     FavoriteButton(sourceId: channel.sourceId, channelId: channel.id)
                         .font(.title2)
                 }
+
+                if let progress, resumable {
+                    HStack(spacing: 10) {
+                        ProgressBar(fraction: progress.fraction, width: 200)
+                        Text("\(progress.minutesLeft) min left")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Button {
+                    watch.setWatched(channel: channel, series: nil, watched: !(progress?.watched ?? false))
+                } label: {
+                    Label(
+                        (progress?.watched ?? false) ? "Mark as unwatched" : "Mark as watched",
+                        systemImage: (progress?.watched ?? false) ? "eye.slash" : "checkmark.circle"
+                    )
+                    .font(.subheadline)
+                }
+                .buttonStyle(.borderless)
 
                 Divider()
 
