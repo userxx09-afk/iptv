@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var activeSource: TvSource = SourceStore.shared.active()
 
     @State private var showSettings = false
+    @State private var showSearch = false
     @State private var showAddSource = false
     @State private var addSourceBusy = false
     @State private var addSourceError: String?
@@ -50,6 +51,21 @@ struct ContentView: View {
     }
 
     private var isLoading: Bool { playlistLoader.isLoading || xtreamLoader.isLoading }
+
+    private var hasContent: Bool { !playlistLoader.channels.isEmpty || xtreamLoader.isLoggedIn }
+
+    /// Everything the active source carries, grouped by kind, for the search
+    /// screen.
+    private var searchGroups: [SearchGroup] {
+        if !playlistLoader.channels.isEmpty {
+            return [SearchGroup(title: "Channels", channels: playlistLoader.channels)]
+        }
+        return [
+            SearchGroup(title: "Live TV", channels: xtreamLoader.liveChannels),
+            SearchGroup(title: "Movies", channels: xtreamLoader.movies),
+            SearchGroup(title: "Shows", channels: xtreamLoader.series),
+        ]
+    }
 
     private var currentError: String? {
         activeSource.kind == .xtream ? xtreamLoader.errorMessage : playlistLoader.errorMessage
@@ -79,9 +95,25 @@ struct ContentView: View {
                         Image(systemName: "gearshape")
                     }
                 }
+                if hasContent {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showSearch = true
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                    }
+                }
             }
         }
         .task { startupLoad() }
+        .sheet(isPresented: $showSearch) {
+            SearchView(
+                groups: searchGroups,
+                loader: xtreamLoader,
+                onClose: { showSearch = false }
+            )
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(
                 sources: sources,
