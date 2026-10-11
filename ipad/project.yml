@@ -104,6 +104,7 @@ targets:
         # exclude media, so no second key is needed here at all.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: "Tapper connects to your own server or NAS to share watch history with your other devices."
     # Code signing is deliberately NOT configured here. CI passes
     # CODE_SIGN_STYLE/DEVELOPMENT_TEAM/PROVISIONING_PROFILE_SPECIFIER as
     # xcodebuild* command-line overrides at archive time instead (see the
