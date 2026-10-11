@@ -3,10 +3,13 @@ package io.tapper.core.xtream.multiplatform
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.*
 import io.tapper.core.model.CategoryName
 import io.tapper.core.model.Channel
 import io.tapper.core.model.ContentKind
@@ -30,20 +33,20 @@ import kotlinx.serialization.json.contentOrNull
  * Two deliberate differences from the Fire TV original, both worth knowing
  * about rather than discovering by surprise:
  *
- * 1. Not streaming. The Fire TV version reads get_live_streams/
- *    get_vod_streams/get_series with a hand-rolled streaming JsonReader
- *    specifically because one real account's get_series response measured
- *    over 100MB, and slurping that into one String plus a full JSON tree on
- *    top of it is two simultaneous in-memory copies of a 100MB+ document - on
- *    a Fire TV Stick, that is what an OutOfMemoryError on "Couldn't load
- *    shows" turned out to be. kotlinx.serialization's multiplatform streaming
- *    story (decodeToSequence) is JVM/InputStream-only, not available on
- *    iOS/Native, so this version uses the same whole-body-then-JsonElement-
- *    tree approach [TmdbClient] uses instead. An iPad has far more memory
- *    headroom than a Fire TV Stick, so this is a reasonable trade for now -
- *    but a 100MB+ catalogue on this path is still a real risk worth
- *    revisiting with a genuine multiplatform streaming parser if it turns
- *    out to matter in practice.
+ * 1. The three big catalogue endpoints (get_live_streams, get_vod_streams,
+ *    get_series) are STREAMED, not read whole. One real account's
+ *    get_series response measures well over 100MB; reading that into one
+ *    String and then a full JsonElement tree on top meant several
+ *    simultaneous copies of the document and pushed an iPad past its memory
+ *    limit (the app was killed mid-load - confirmed by the on-device log,
+ *    memory climbing past 1.4GB). kotlinx.serialization's own streaming
+ *    (decodeToSequence) is JVM-only, so [streamObjects] below does the
+ *    splitting itself: it scans the response bytes for the boundaries of
+ *    each top-level object in the array, and parses each object on its own
+ *    with the normal JSON parser the moment it is complete. Peak memory is
+ *    one network chunk plus one item, instead of the whole document.
+ *    Small responses (account info, category lists, one series' episodes)
+ *    still use the simple whole-body path.
  *
  * 2. Simpler network-error messages. The original distinguishes DNS
  *    failures, timeouts, refused connections and TLS problems using
@@ -159,18 +162,18 @@ class XtreamClient(
     ): List<Channel> {
         val cats = loadCategories("get_live_categories", onWarning, "live categories")
         val ext = if (preferHls) "m3u8" else "ts"
-        val arr = parseArray(fetch(api("get_live_streams")))
-        val out = ArrayList<Channel>(arr.size)
-        arr.forEachIndexed { i, el ->
-            val o = el as? JsonObject ?: return@forEachIndexed
-            val id = o.str("stream_id") ?: return@forEachIndexed
-            val name = o.str("name")?.trim() ?: return@forEachIndexed
+        val out = ArrayList<Channel>()
+        var index = 0
+        streamObjects(api("get_live_streams"), onReset = { out.clear(); index = 0 }) { o ->
+            val i = index++
+            val id = o.str("stream_id") ?: return@streamObjects
+            val name = o.str("name")?.trim() ?: return@streamObjects
             // A pure section-divider entry ("##### ENTERTAINMENT #####"),
             // not a real channel - see isDecorativeSectionLabel's doc.
             // Skipped here rather than filtered later in the UI, so it never
             // gets counted, numbered, or focused as if it were a real
             // stream anywhere downstream.
-            if (isDecorativeSectionLabel(name)) return@forEachIndexed
+            if (isDecorativeSectionLabel(name)) return@streamObjects
             val parsed = CategoryName.parse(o.categoryKey()?.let { cats[it] })
             out.add(
                 Channel(
@@ -198,13 +201,11 @@ class XtreamClient(
      */
     suspend fun movies(sourceId: String, onWarning: (String) -> Unit = {}): List<Channel> {
         val cats = loadCategories("get_vod_categories", onWarning, "movie categories")
-        val arr = parseArray(fetch(api("get_vod_streams")))
-        val out = ArrayList<Channel>(arr.size)
-        for (el in arr) {
-            val o = el as? JsonObject ?: continue
-            val id = o.str("stream_id") ?: continue
-            val name = o.str("name")?.trim() ?: continue
-            if (isDecorativeSectionLabel(name)) continue
+        val out = ArrayList<Channel>()
+        streamObjects(api("get_vod_streams"), onReset = { out.clear() }) { o ->
+            val id = o.str("stream_id") ?: return@streamObjects
+            val name = o.str("name")?.trim() ?: return@streamObjects
+            if (isDecorativeSectionLabel(name)) return@streamObjects
             val parsed = CategoryName.parse(o.categoryKey()?.let { cats[it] })
             val ext = o.str("container_extension") ?: "mp4"
             out.add(
@@ -233,13 +234,11 @@ class XtreamClient(
      */
     suspend fun series(sourceId: String, onWarning: (String) -> Unit = {}): List<Channel> {
         val cats = loadCategories("get_series_categories", onWarning, "show categories")
-        val arr = parseArray(fetch(api("get_series")))
-        val out = ArrayList<Channel>(arr.size)
-        for (el in arr) {
-            val o = el as? JsonObject ?: continue
-            val id = o.str("series_id") ?: continue
-            val name = o.str("name")?.trim() ?: continue
-            if (isDecorativeSectionLabel(name)) continue
+        val out = ArrayList<Channel>()
+        streamObjects(api("get_series"), onReset = { out.clear() }) { o ->
+            val id = o.str("series_id") ?: return@streamObjects
+            val name = o.str("name")?.trim() ?: return@streamObjects
+            if (isDecorativeSectionLabel(name)) return@streamObjects
             val parsed = CategoryName.parse(o.categoryKey()?.let { cats[it] })
             out.add(
                 Channel(
@@ -347,6 +346,118 @@ class XtreamClient(
             throw XtreamException("Unexpected response from the server.", t)
         }
 
+    /**
+     * Streams the top-level JSON array at [url]: each element that is an
+     * object is handed to [onObject] as soon as it has arrived in full, and
+     * then dropped - see the class doc (point 1) for why. Same retry policy as
+     * [fetch]; [onReset] runs before every attempt so a retry after a
+     * mid-stream failure starts from an empty result instead of duplicating
+     * what the failed attempt had already delivered.
+     */
+    private suspend fun streamObjects(
+        url: String,
+        onReset: () -> Unit,
+        onObject: (JsonObject) -> Unit,
+    ) {
+        var lastError: Throwable? = null
+        repeat(3) { attempt ->
+            onReset()
+            try {
+                streamOnce(url, onObject)
+                return
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: XtreamException) {
+                throw e
+            } catch (t: Throwable) {
+                lastError = t
+                if (attempt < 2) delay(400L * (attempt + 1))
+            }
+        }
+        throw XtreamException("Couldn't reach the server: ${lastError?.message}", lastError)
+    }
+
+    private suspend fun streamOnce(url: String, onObject: (JsonObject) -> Unit) {
+        http.prepareGet(url) { header("User-Agent", "TapperIPTV/0.5") }.execute { response ->
+            if (!response.status.isSuccess()) {
+                throw XtreamException(
+                    when (response.status.value) {
+                        401, 403 -> "Server refused the request (HTTP ${response.status.value}). Check the username and password."
+                        404 -> "Server has no Xtream API at this address (HTTP 404). Check the port and path."
+                        else -> "Server returned HTTP ${response.status.value}."
+                    }
+                )
+            }
+            val channel = response.bodyAsChannel()
+            val buf = ByteArray(64 * 1024)
+            val element = ByteAccumulator()
+            var started = false      // saw the opening '[' of the array
+            var finished = false     // saw its closing ']'
+            var depth = 0
+            var inString = false
+            var escape = false
+            var capturing = false    // inside a top-level object right now
+
+            while (true) {
+                val n = channel.readAvailable(buf, 0, buf.size)
+                if (n < 0) break
+                var segStart = 0     // where the current object's bytes begin in this chunk
+                var i = 0
+                while (i < n) {
+                    val b = buf[i].toInt()
+                    if (!started) {
+                        // Leading whitespace / UTF-8 byte-order mark.
+                        if (b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D ||
+                            b == 0xEF - 256 || b == 0xBB - 256 || b == 0xBF - 256
+                        ) { i++; continue }
+                        if (b == '['.code) { started = true; depth = 1; i++; continue }
+                        if (b == '<'.code) {
+                            throw XtreamException("The server returned a web page, not data. Check the host address.")
+                        }
+                        throw XtreamException("Unexpected response from the server.")
+                    }
+                    if (inString) {
+                        if (escape) escape = false
+                        else if (b == '\\'.code) escape = true
+                        else if (b == '"'.code) inString = false
+                    } else {
+                        when (b) {
+                            '"'.code -> inString = true
+                            '{'.code -> {
+                                depth++
+                                if (depth == 2) { capturing = true; segStart = i; element.reset() }
+                            }
+                            '['.code -> depth++
+                            '}'.code -> {
+                                depth--
+                                if (depth == 1 && capturing) {
+                                    element.add(buf, segStart, i + 1)
+                                    capturing = false
+                                    val parsed = try {
+                                        Json.parseToJsonElement(element.text())
+                                    } catch (t: Throwable) {
+                                        null
+                                    }
+                                    if (parsed is JsonObject) onObject(parsed)
+                                }
+                            }
+                            ']'.code -> {
+                                depth--
+                                if (depth == 0) finished = true
+                            }
+                        }
+                    }
+                    i++
+                }
+                // An object still open at the end of this chunk: keep what has
+                // arrived of it and carry on with the next chunk.
+                if (capturing) element.add(buf, segStart, n)
+            }
+            if (!started) throw XtreamException("Unexpected response from the server.")
+            if (!finished) throw IllegalStateException("The response ended early.")
+        }
+    }
+
     // Up to 3 attempts: the real request plus 2 short-delayed retries,
     // bounded so a genuinely dead panel still fails in under ~1.5s of extra
     // wait rather than hanging.
@@ -396,6 +507,28 @@ class XtreamClient(
         }
         throw XtreamException("Couldn't reach the server: ${lastError?.message}", lastError)
     }
+}
+
+/** A growable byte buffer for the one object currently being received. */
+private class ByteAccumulator {
+    private var bytes = ByteArray(8 * 1024)
+    private var size = 0
+
+    fun reset() {
+        size = 0
+        // Don't hold on to the room one unusually large item needed.
+        if (bytes.size > 1_048_576) bytes = ByteArray(8 * 1024)
+    }
+
+    fun add(src: ByteArray, from: Int, toExclusive: Int) {
+        val len = toExclusive - from
+        if (len <= 0) return
+        if (size + len > bytes.size) bytes = bytes.copyOf(maxOf(bytes.size * 2, size + len))
+        src.copyInto(bytes, size, from, toExclusive)
+        size += len
+    }
+
+    fun text(): String = bytes.decodeToString(0, size)
 }
 
 data class XtreamAccount(
