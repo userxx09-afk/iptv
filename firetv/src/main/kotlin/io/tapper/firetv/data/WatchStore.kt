@@ -26,6 +26,13 @@ class WatchStore(context: Context) : SQLiteOpenHelper(context, "tapper_watch.db"
         val watched: Boolean,
         val clock: Long,
         val deviceId: String,
+        /**
+         * Set (in the shared file only, never stored) when a device
+         * deliberately cleared this item - marked it unwatched or removed its
+         * progress. The one case where "watched" may be taken back; see
+         * [mergeOne].
+         */
+        val reset: Boolean = false,
     ) {
         /**
          * Complete at 92%, or with under two minutes left, whichever comes
@@ -45,6 +52,7 @@ class WatchStore(context: Context) : SQLiteOpenHelper(context, "tapper_watch.db"
             .put("season", season).put("number", number).put("title", title)
             .put("pos", positionMs).put("dur", durationMs)
             .put("watched", watched).put("clock", clock).put("device", deviceId)
+            .apply { if (reset) put("reset", true) }
 
         companion object {
             fun fromJson(o: JSONObject) = Entry(
@@ -59,6 +67,7 @@ class WatchStore(context: Context) : SQLiteOpenHelper(context, "tapper_watch.db"
                 watched = o.optBoolean("watched"),
                 clock = o.optLong("clock"),
                 deviceId = o.optString("device"),
+                reset = o.optBoolean("reset"),
             )
         }
     }
@@ -121,9 +130,13 @@ class WatchStore(context: Context) : SQLiteOpenHelper(context, "tapper_watch.db"
 
     /** The merge rule, applied identically locally and when reading remote shards. */
     fun mergeOne(a: Entry, b: Entry): Entry {
-        val watched = a.watched || b.watched
         val newer = if (b.clock >= a.clock) b else a
+        // Watched is otherwise a one-way switch, so a late event from a
+        // sleeping device can't un-watch. A deliberate clear that is also the
+        // newest change is the exception: it wins.
+        val watched = if (newer.reset) false else a.watched || b.watched
         return newer.copy(
+            reset = false,
             watched = watched,
             durationMs = maxOf(a.durationMs, b.durationMs),
             // Position is meaningless once complete, and keeping a stale one
