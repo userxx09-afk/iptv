@@ -6,6 +6,35 @@ import TapperCore
 /// CategoryPickerSheet (the selectable row) below.
 private let favoritesPseudoCategory = "\u{2605} Favorites"
 
+/// Reads the short language tag a provider puts at the front of a category,
+/// however it is wrapped - "[EN] ...", "( EN ) ...", "|EN| ...", "EN - ...",
+/// "EN: ...". It must be followed by a real delimiter, which is what stops
+/// "English Movies" or "Entertainment" being read as a tag. Same rule as Fire
+/// TV's BrowseScreen.
+private enum CategoryTag {
+    private static let pattern = try? NSRegularExpression(
+        pattern: #"^[\[(|\s]*([A-Za-z]{2,6})[\]) |:/~>_-]"#
+    )
+
+    static func leadingTag(_ category: String) -> String? {
+        let text = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let whole = NSRange(location: 0, length: (text as NSString).length)
+        guard let match = pattern?.firstMatch(in: text, range: whole),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        return String(text[range]).uppercased()
+    }
+
+    /// 1 = English, 2 = multi-audio (shows only), 3 = everything else
+    /// (0 is the user's own pins, handled by the caller).
+    static func tier(of category: String, namespace: String) -> Int {
+        let tag = leadingTag(category)
+        if tag == "EN" { return 1 }
+        if namespace == "series" && tag == "MULTI" { return 2 }
+        return 3
+    }
+}
+
 /// Groups a channel list by country and category and lets the user filter to
 /// either - the iPad counterpart of Fire TV's BrowseScreen pickers. The ⋯ menu
 /// saves the current country + category as this list's starting point (Fire
@@ -74,14 +103,20 @@ struct CategoryFilteredList<RowContent: View>: View {
     }
 
     // Pinned categories first (whatever the user has starred in the picker
-    // sheet - nothing promoted automatically), then everything else
-    // alphabetically, same as before. Only evaluated while the picker sheet
-    // is actually open.
+    // sheet), then English ones ("EN - ...", "|EN| ...", "[EN] ..."), then -
+    // for shows - multi-audio ones, then everything else alphabetically. The
+    // same order as Fire TV's category list. Only evaluated while the picker
+    // sheet is actually open.
     private var orderedCategories: [String] {
-        let names = visibleCategoryNames
-        let pinned = names.filter(isPinned)
-        let rest = names.filter { !isPinned($0) }
-        return pinned + rest
+        var tiers: [[String]] = [[], [], [], []]
+        for name in visibleCategoryNames {
+            if isPinned(name) {
+                tiers[0].append(name)
+            } else {
+                tiers[CategoryTag.tier(of: name, namespace: categoryNamespace)].append(name)
+            }
+        }
+        return tiers.flatMap { $0 }
     }
 
     /// Every category, or - with a country chosen - just the ones that
