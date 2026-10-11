@@ -17,7 +17,19 @@ struct TitleInfoBlock: View {
         case found(MovieMetadata)
     }
 
-    @State private var state: LoadState = .loading
+    @State private var state: LoadState
+
+    init(name: String, isShow: Bool) {
+        self.name = name
+        self.isShow = isShow
+        // A title seen before this run shows its poster and synopsis from
+        // the first frame - no blank, no spinner, nothing to flash.
+        if let known = MovieMetadataStore.shared.knownLookup(name: name, isShow: isShow) {
+            _state = State(initialValue: TitleInfoBlock.state(from: known))
+        } else {
+            _state = State(initialValue: .loading)
+        }
+    }
 
     var body: some View {
         content
@@ -25,15 +37,25 @@ struct TitleInfoBlock: View {
             .task(id: name) { await load() }
     }
 
+    private static func state(from result: TitleLookup) -> LoadState {
+        switch result {
+        case .noKey: return .noKey
+        case .notFound: return .notFound
+        case .failed(let message): return .failed(message)
+        case .found(let meta): return .found(meta)
+        }
+    }
+
     private func load() async {
-        state = .loading
+        // Already showing a final answer for this title - nothing to fetch.
+        switch state {
+        case .loading, .failed: break
+        default: return
+        }
         let result = await MovieMetadataStore.shared.lookup(name: name, isShow: isShow)
         if Task.isCancelled { return }
-        switch result {
-        case .noKey: state = .noKey
-        case .notFound: state = .notFound
-        case .failed(let message): state = .failed(message)
-        case .found(let meta): state = .found(meta)
+        withAnimation(.easeOut(duration: 0.25)) {
+            state = TitleInfoBlock.state(from: result)
         }
     }
 
@@ -41,9 +63,21 @@ struct TitleInfoBlock: View {
     private var content: some View {
         switch state {
         case .loading:
-            HStack(spacing: 10) {
-                ProgressView()
-                Text("Looking it up...").foregroundStyle(.secondary)
+            // A grey outline the size of the real thing, so the page does not
+            // jump or flash when the poster and text arrive.
+            HStack(alignment: .top, spacing: 20) {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.secondary.opacity(0.12))
+                    .frame(width: 200, height: 300)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Programme title goes here")
+                        .font(.title3.weight(.semibold))
+                    Text("★ 0.0 / 10")
+                        .font(.subheadline)
+                    Text(String(repeating: "The synopsis goes here and runs on for a few lines. ", count: 5))
+                        .font(.body)
+                }
+                .redacted(reason: .placeholder)
             }
         case .noKey:
             Text("Add a free TMDb API key in Settings > Movie & show info to see posters, synopses and ratings here.")
@@ -62,7 +96,7 @@ struct TitleInfoBlock: View {
     private func found(_ meta: MovieMetadata) -> some View {
         HStack(alignment: .top, spacing: 20) {
             if let poster = meta.posterUrl, let url = URL(string: poster) {
-                AsyncImage(url: url) { phase in
+                AsyncImage(url: url, transaction: Transaction(animation: .easeIn(duration: 0.25))) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -74,8 +108,8 @@ struct TitleInfoBlock: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     default:
-                        ProgressView()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // Quiet placeholder rather than a spinner.
+                        Color.secondary.opacity(0.12)
                     }
                 }
                 .frame(width: 200, height: 300)

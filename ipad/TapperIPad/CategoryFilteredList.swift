@@ -226,11 +226,15 @@ struct CategoryFilteredList<RowContent: View>: View {
     /// A fresh list always starts clean, then opens on the saved starting
     /// point if there is one and it still exists in this list - a starting
     /// point naming a country or category this provider doesn't have just
-    /// shows the whole list.
+    /// shows the whole list. With no starting point saved, a list opens on
+    /// the United States when it has it.
     private func applyStartingPoint(_ built: CategoryIndex) {
         selectedCountry = nil
         selectedCategory = nil
-        guard let home = startup.home(for: categoryNamespace) else { return }
+        guard let home = startup.home(for: categoryNamespace) else {
+            selectedCountry = built.countryCategories.keys.first { $0.lowercased() == "us" }
+            return
+        }
         if let code = home.countryCode {
             guard built.countryCategories[code] != nil else { return }
             selectedCountry = code

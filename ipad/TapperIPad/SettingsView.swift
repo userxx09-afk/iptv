@@ -108,7 +108,19 @@ struct SettingsView: View {
                 } header: {
                     Text("Starting points")
                 } footer: {
-                    Text("A starting point is the country and category a list opens on. Choose the country and category you want in a list, then tap the \u{22EF} button beside them and \"Make this my starting point\".")
+                    Text("A starting point is the country and category a list opens on. Choose them in a list, then tap the \u{22EF} button beside them and \"Make this my starting point\". With none saved, lists open on United States when the source has it - save \"All Countries\" as the starting point to see everything instead.")
+                }
+
+                Section {
+                    NavigationLink {
+                        GuideSettingsView()
+                    } label: {
+                        Label("Program guide", systemImage: "list.bullet.rectangle")
+                    }
+                } header: {
+                    Text("Guide")
+                } footer: {
+                    Text("What's on now beside every live channel, schedules, and extra listings such as Marquee Sports Network.")
                 }
 
                 Section {

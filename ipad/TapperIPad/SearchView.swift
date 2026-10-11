@@ -34,6 +34,8 @@ struct SearchView: View {
     @State private var results: [SearchResultSection] = []
     @State private var searching = false
     @State private var playing: Channel?
+    @State private var programmeHits: [ProgrammeHit] = []
+    @State private var guideChannel: Channel?
 
     private var normalized: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -60,6 +62,16 @@ struct SearchView: View {
                 } else if results.isEmpty {
                     Text("Nothing found for \"\(query)\".")
                         .foregroundStyle(.secondary)
+                }
+
+                if !searching && !programmeHits.isEmpty {
+                    Section {
+                        ForEach(programmeHits) { hit in
+                            programmeRow(hit)
+                        }
+                    } header: {
+                        Text("On TV (\(programmeHits.count))")
+                    }
                 }
 
                 if !searching {
@@ -104,6 +116,49 @@ struct SearchView: View {
         .fullScreenCover(item: $playing) { channel in
             PlayerView(channel: channel)
         }
+        .sheet(item: $guideChannel) { channel in
+            ChannelGuideView(
+                channel: channel,
+                onPlay: { picked in
+                    guideChannel = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { playing = picked }
+                },
+                onClose: { guideChannel = nil }
+            )
+        }
+    }
+
+    // A programme found in the guide. Airing now: tap plays the channel.
+    // Later: tap opens that channel's schedule.
+    @ViewBuilder
+    private func programmeRow(_ hit: ProgrammeHit) -> some View {
+        let nowSeconds = Int(Date().timeIntervalSince1970)
+        let airing = hit.programme.isAiring(at: nowSeconds)
+        Button {
+            guard let channel = hit.channel else { return }
+            if airing && channel.isPlayable {
+                playing = channel
+            } else {
+                guideChannel = channel
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(hit.programme.title)
+                    .font(.body)
+                    .foregroundStyle(hit.channel == nil ? Color.secondary : Color.primary)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(airing ? "On now" : hit.programme.startDate.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
+                        .foregroundStyle(airing ? Color.blue : Color.secondary)
+                    Text("·").foregroundStyle(.secondary)
+                    Text(hit.channel?.name ?? hit.programme.channelId)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .font(.caption)
+            }
+        }
+        .disabled(hit.channel == nil)
     }
 
     private func header(for section: SearchResultSection) -> String {
@@ -161,6 +216,7 @@ struct SearchView: View {
         let q = normalized
         if q.count < 2 {
             results = []
+            programmeHits = []
             searching = false
             return
         }
@@ -176,6 +232,11 @@ struct SearchView: View {
         if Task.isCancelled { return }
         results = found
         searching = false
+
+        // Programme titles come from the guide, a moment after the channels.
+        let hits = await EpgManager.shared.searchProgrammes(q)
+        if Task.isCancelled { return }
+        programmeHits = hits
     }
 }
 

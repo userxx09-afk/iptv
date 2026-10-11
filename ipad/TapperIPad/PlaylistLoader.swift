@@ -12,6 +12,8 @@ import TapperCore
 @MainActor
 final class PlaylistLoader: ObservableObject {
     @Published private(set) var channels: [Channel] = []
+    /// Guide (XMLTV) URLs the playlist itself names.
+    private(set) var declaredEpgUrls: [String] = []
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
 
@@ -75,6 +77,7 @@ final class PlaylistLoader: ObservableObject {
                 await MainActor.run {
                     guard let self, self.generation == myGeneration else { return }
                     self.channels = result.channels
+                    self.declaredEpgUrls = result.declaredEpgUrls
                     self.isLoading = false
                 }
             } catch {
@@ -94,6 +97,7 @@ final class PlaylistLoader: ObservableObject {
         generation += 1
         isLoading = false
         channels = []
+        declaredEpgUrls = []
         errorMessage = nil
     }
 }

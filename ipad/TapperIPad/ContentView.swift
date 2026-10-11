@@ -48,6 +48,9 @@ struct ContentView: View {
     /// conformance, required for `.fullScreenCover(item:)` below.
     @State private var playingChannel: Channel?
 
+    /// The live channel whose schedule is open.
+    @State private var guideChannel: Channel?
+
     /// What's waiting on the in-flight load started from AddSourceView, so
     /// the onChange handlers below know what to persist once it finishes -
     /// and can tell that load apart from an ordinary source switch, which
@@ -114,6 +117,20 @@ struct ContentView: View {
             }
         }
         .task { startupLoad() }
+        .sheet(item: $guideChannel) { channel in
+            ChannelGuideView(
+                channel: channel,
+                onPlay: { picked in
+                    guideChannel = nil
+                    // Let the sheet finish closing before the player opens.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: picked.id)
+                        playingChannel = picked
+                    }
+                },
+                onClose: { guideChannel = nil }
+            )
+        }
         .sheet(isPresented: $showSearch) {
             SearchView(
                 groups: searchGroups,
@@ -171,6 +188,7 @@ struct ContentView: View {
             guard !loading else { return }
             loadSettled()
             if pendingSourceSave == nil { resumeLastIfWanted() }
+            defer { DispatchQueue.main.async { activateGuide() } }
             guard case .xtream(let name, let host, let user, let pass)? = pendingSourceSave else { return }
             if xtreamLoader.isLoggedIn {
                 let id = "xtream-" + String(UUID().uuidString.prefix(8))
@@ -187,6 +205,7 @@ struct ContentView: View {
             guard !loading else { return }
             loadSettled()
             if pendingSourceSave == nil { resumeLastIfWanted() }
+            defer { DispatchQueue.main.async { activateGuide() } }
             guard case .m3u(let name, let url, let epg)? = pendingSourceSave else { return }
             if !playlistLoader.channels.isEmpty {
                 let id = "m3u-" + String(UUID().uuidString.prefix(8))
@@ -205,6 +224,7 @@ struct ContentView: View {
                 AppLog.shared.markBackgrounded()
             case .active:
                 AppLog.shared.markForegrounded()
+                EpgManager.shared.reloadNow()
             default:
                 break
             }
@@ -258,6 +278,25 @@ struct ContentView: View {
             AppLog.shared.log("SESSION", "Resuming \"\(channel.name)\"")
             playingChannel = channel
         }
+    }
+
+    /// A source finished loading: hand its live channels to the guide, which
+    /// shows what is already stored and refreshes it in the background if it
+    /// is old.
+    private func activateGuide() {
+        let live: [Channel]
+        if !playlistLoader.channels.isEmpty {
+            live = playlistLoader.channels
+        } else if xtreamLoader.isLoggedIn {
+            live = xtreamLoader.liveChannels
+        } else {
+            return
+        }
+        EpgManager.shared.activate(
+            source: activeSource,
+            declaredEpgUrls: playlistLoader.declaredEpgUrls,
+            liveChannels: live
+        )
     }
 
     private func beginLoadBreadcrumb(id: String, name: String) {
@@ -322,6 +361,7 @@ struct ContentView: View {
         activeSource = source
         launchResumePending = false
         showSettings = false
+        EpgManager.shared.deactivate()
         playlistLoader.reset()
         xtreamLoader.reset()
         loadSource(source)
@@ -512,18 +552,33 @@ struct ContentView: View {
                         channelRowLabel(channel)
                     }
                 } else {
+                    let isLive = namespace == "live" || namespace == "playlist"
                     Button {
                         // Remembered for "Resume the last channel" - live
                         // channels only; a film or episode is not something
                         // to jump back into at launch.
-                        if namespace == "live" || namespace == "playlist" {
+                        if isLive {
                             StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: channel.id)
                         }
                         playingChannel = channel
                     } label: {
-                        channelRowLabel(channel)
+                        if isLive {
+                            // What is on now, from the guide.
+                            LiveRowLabel(channel: channel)
+                        } else {
+                            channelRowLabel(channel)
+                        }
                     }
                     .disabled(!channel.isPlayable)
+                    if isLive {
+                        Button {
+                            guideChannel = channel
+                        } label: {
+                            Image(systemName: "list.bullet.rectangle")
+                                .foregroundStyle(Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 Spacer()
                 FavoriteButton(sourceId: channel.sourceId, channelId: channel.id)

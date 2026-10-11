@@ -46,6 +46,12 @@ final class MovieMetadataStore: ObservableObject {
     private let defaults = UserDefaults.standard
     private let cache = TmdbCache()
 
+    /// Answers already known this run, readable instantly from the UI -
+    /// coming back to a title shows its poster at once instead of starting
+    /// from a blank and a spinner. Found / not-found only (never failures).
+    private let memoryLock = NSLock()
+    private var memory: [String: TitleLookup] = [:]
+
     /// Bumped when the key changes.
     @Published private(set) var revision = 0
 
@@ -69,26 +75,52 @@ final class MovieMetadataStore: ObservableObject {
     }
 
     func clearCache() async {
+        memoryLock.lock()
+        memory = [:]
+        memoryLock.unlock()
         await cache.clear()
+    }
+
+    private func cacheKey(_ name: String, isShow: Bool) -> String? {
+        let (title, year) = Self.parseTitle(name)
+        if title.isEmpty { return nil }
+        return "\(isShow ? "S" : "M")|\(title.lowercased())|\(year.map(String.init) ?? "")"
+    }
+
+    /// The answer for a title if it is already known this run, else nil.
+    func knownLookup(name: String, isShow: Bool) -> TitleLookup? {
+        guard let key = cacheKey(name, isShow: isShow) else { return nil }
+        memoryLock.lock()
+        defer { memoryLock.unlock() }
+        return memory[key]
+    }
+
+    private func remember(_ key: String, _ value: TitleLookup) {
+        memoryLock.lock()
+        memory[key] = value
+        memoryLock.unlock()
     }
 
     func lookup(name: String, isShow: Bool) async -> TitleLookup {
         let key = apiKey
         if key.isEmpty { return .noKey }
+        guard let cacheKey = cacheKey(name, isShow: isShow) else { return .notFound }
+        if let known = knownLookup(name: name, isShow: isShow) { return known }
         let (title, year) = Self.parseTitle(name)
-        if title.isEmpty { return .notFound }
 
-        let cacheKey = "\(isShow ? "S" : "M")|\(title.lowercased())|\(year.map(String.init) ?? "")"
         if let hit = await cache.read(cacheKey) {
-            if hit.found, let meta = hit.meta { return .found(meta) }
-            return .notFound
+            let value: TitleLookup
+            if hit.found, let meta = hit.meta { value = .found(meta) } else { value = .notFound }
+            remember(cacheKey, value)
+            return value
         }
 
         do {
             let result = try await Self.search(title: title, year: year, isShow: isShow, key: key)
             await cache.write(cacheKey, result)
-            if let result { return .found(result) }
-            return .notFound
+            let value: TitleLookup = result.map { .found($0) } ?? .notFound
+            remember(cacheKey, value)
+            return value
         } catch {
             if Task.isCancelled { return .failed("cancelled") }
             let message = (error as? TmdbError)?.message ?? "Couldn't reach TMDb: \(error.localizedDescription)"
