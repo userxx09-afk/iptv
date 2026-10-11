@@ -96,7 +96,7 @@ struct SyncSettingsView: View {
             } header: {
                 Text("This device")
             } footer: {
-                Text("How this iPad is named to your other devices. It syncs when the app opens, when you come back to it, and when a film or episode closes. Marking something unwatched on one device stays on that device. The Fire TV app syncs when it starts.")
+                Text("How this iPad is named to your other devices. It syncs when the app opens, when you come back to it, and when a film or episode closes. Marking something unwatched, or removing it from Continue, reaches your other devices too. The Fire TV app syncs when it starts, when you return to it, and when something stops playing.")
             }
         }
         .navigationTitle("Sync")

@@ -232,12 +232,12 @@ final class WatchStore: ObservableObject {
         let mine = entries.values
             .filter { $0.device == deviceId && $0.clock != nil }
             .sorted { ($0.clock ?? 0) > ($1.clock ?? 0) }
-        let rows: [[String: Any]] = mine.map { e in
+        let rows: [[String: Any]] = mine.map { (e: WatchEntry) -> [String: Any] in
             var series: Any = NSNull()
             if let sid = e.seriesId, !sid.isEmpty {
                 series = sid.hasPrefix("series-") ? String(sid.dropFirst("series-".count)) : sid
             }
-            return [
+            var row: [String: Any] = [
                 "item": e.channelId,
                 "source": e.appSourceId,
                 "series": series,
@@ -250,6 +250,11 @@ final class WatchStore: ObservableObject {
                 "clock": e.clock ?? 0,
                 "device": deviceId,
             ]
+            // A deliberate clear (mark unwatched, remove, watching a finished
+            // item again) tells the other devices to drop their watched mark
+            // too. Only while it is the latest change to the entry.
+            if let reset = e.resetClock, reset == e.clock { row["reset"] = true }
+            return row
         }
         let root: [String: Any] = [
             "version": 1,
@@ -288,7 +293,9 @@ final class WatchStore: ObservableObject {
             if !knownSources.contains(source) { source = active }
 
             var seriesId: String?
-            if let raw = o["series"] as? String, !raw.isEmpty, raw != "null" {
+            // Only episodes belong to a show (older Fire TV builds tagged
+            // films watched after browsing a show with that show's id).
+            if item.hasPrefix("ep-"), let raw = o["series"] as? String, !raw.isEmpty, raw != "null" {
                 seriesId = raw.hasPrefix("series-") ? raw : "series-" + raw
             }
             let clock = int(o["clock"])
@@ -307,7 +314,7 @@ final class WatchStore: ObservableObject {
                 clock: clock, device: device,
                 season: Int(int(o["season"])), number: Int(int(o["number"]))
             )
-            if merge(remote) { changed += 1 }
+            if merge(remote, isReset: (o["reset"] as? Bool) ?? false) { changed += 1 }
         }
         if changed > 0 {
             scheduleSave()
@@ -316,7 +323,7 @@ final class WatchStore: ObservableObject {
         return (changed, label)
     }
 
-    private func merge(_ remote: WatchEntry) -> Bool {
+    private func merge(_ remote: WatchEntry, isReset: Bool) -> Bool {
         guard let local = entries[remote.id] else {
             entries[remote.id] = remote
             return true
@@ -326,8 +333,11 @@ final class WatchStore: ObservableObject {
         // Cleared here on purpose, after this copy was made.
         if let reset = local.resetClock, remoteClock <= reset { return false }
 
-        let watched = local.watched || remote.watched
-        var merged = remoteClock >= localClock ? remote : local
+        // Watched is one-way, except that a deliberate clear which is also the
+        // newest change wins.
+        let remoteNewer = remoteClock >= localClock
+        let watched = (remoteNewer && isReset) ? false : (local.watched || remote.watched)
+        var merged = remoteNewer ? remote : local
         merged.watched = watched
         merged.durationSec = max(local.durationSec, remote.durationSec)
         merged.positionSec = watched ? 0 : merged.positionSec

@@ -157,6 +157,21 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink {
+                        RemindersView()
+                    } label: {
+                        HStack {
+                            Label("Reminders", systemImage: "bell")
+                            Spacer()
+                            Text("\(ReminderStore.shared.upcoming().count)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } footer: {
+                    Text("Get a notification when a programme you picked in a channel's schedule is about to start.")
+                }
+
+                Section {
+                    NavigationLink {
                         SyncSettingsView()
                     } label: {
                         HStack {

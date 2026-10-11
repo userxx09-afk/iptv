@@ -54,6 +54,7 @@ struct ContentView: View {
 
     /// The live channel whose schedule is open.
     @State private var guideChannel: Channel?
+    @ObservedObject private var reminderCenter = ReminderCenter.shared
 
     /// What's waiting on the in-flight load started from AddSourceView, so
     /// the onChange handlers below know what to persist once it finishes -
@@ -191,7 +192,10 @@ struct ContentView: View {
         .onChange(of: xtreamLoader.isLoading) { _, loading in
             guard !loading else { return }
             loadSettled()
-            if pendingSourceSave == nil { resumeLastIfWanted() }
+            if pendingSourceSave == nil {
+                resumeLastIfWanted()
+                openPendingReminder()
+            }
             defer { DispatchQueue.main.async { activateGuide() } }
             guard case .xtream(let name, let host, let user, let pass)? = pendingSourceSave else { return }
             if xtreamLoader.isLoggedIn {
@@ -208,7 +212,10 @@ struct ContentView: View {
         .onChange(of: playlistLoader.isLoading) { _, loading in
             guard !loading else { return }
             loadSettled()
-            if pendingSourceSave == nil { resumeLastIfWanted() }
+            if pendingSourceSave == nil {
+                resumeLastIfWanted()
+                openPendingReminder()
+            }
             defer { DispatchQueue.main.async { activateGuide() } }
             guard case .m3u(let name, let url, let epg)? = pendingSourceSave else { return }
             if !playlistLoader.channels.isEmpty {
@@ -234,6 +241,9 @@ struct ContentView: View {
             default:
                 break
             }
+        }
+        .onChange(of: reminderCenter.pending) { _, target in
+            if target != nil { openPendingReminder() }
         }
         .task {
             // Catch up with the other devices as soon as the app opens.
@@ -281,6 +291,8 @@ struct ContentView: View {
     private func resumeLastIfWanted() {
         guard launchResumePending else { return }
         launchResumePending = false
+        // A tapped reminder takes the place of resuming the last channel.
+        guard reminderCenter.pending == nil else { return }
         guard StartupStore.shared.resumeLast,
               let last = StartupStore.shared.lastLive,
               last.sourceId == activeSource.id else { return }
@@ -293,6 +305,32 @@ struct ContentView: View {
                 return
             }
             AppLog.shared.log("SESSION", "Resuming \"\(channel.name)\"")
+            play(channel, live: true, list: pool.filter { $0.isPlayable })
+        }
+    }
+
+    /// A reminder was tapped: play that channel. If it belongs to another
+    /// source, switch to it first and finish when its load settles; if the
+    /// channels haven't arrived yet, wait for the next load to settle.
+    private func openPendingReminder() {
+        guard let target = reminderCenter.pending else { return }
+        if target.sourceId != activeSource.id {
+            guard let source = SourceStore.shared.all().first(where: { $0.id == target.sourceId }) else {
+                reminderCenter.pending = nil
+                return
+            }
+            selectSource(source)
+            return
+        }
+        DispatchQueue.main.async {
+            let pool = playlistLoader.channels.isEmpty ? xtreamLoader.liveChannels : playlistLoader.channels
+            if pool.isEmpty { return }
+            reminderCenter.pending = nil
+            guard let channel = pool.first(where: { $0.id == target.channelId }), channel.isPlayable else {
+                AppLog.shared.log("REMINDER", "Reminder channel not found in this source")
+                return
+            }
+            AppLog.shared.log("REMINDER", "Opening \"\(channel.name)\" from a reminder")
             play(channel, live: true, list: pool.filter { $0.isPlayable })
         }
     }

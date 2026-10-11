@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import TapperCore
 
 private func clock(_ date: Date) -> String {
@@ -65,6 +66,9 @@ struct ChannelGuideView: View {
 
     @State private var rows: [EpgProgramme] = []
     @State private var loaded = false
+    @ObservedObject private var reminders = ReminderStore.shared
+    @State private var notifyDenied = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -120,6 +124,14 @@ struct ChannelGuideView: View {
                     Button("Done", action: onClose)
                 }
             }
+            .alert("Notifications are off", isPresented: $notifyDenied) {
+                Button("Open iOS Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }
+                Button("Not now", role: .cancel) {}
+            } message: {
+                Text("Turn on notifications for Tapper in iOS Settings to get reminders.")
+            }
         }
         .task {
             let found = await EpgManager.shared.schedule(for: channel)
@@ -161,6 +173,23 @@ struct ChannelGuideView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
                 }
+            }
+            Spacer(minLength: 0)
+            if programme.start > nowSeconds {
+                let set = reminders.has(channel: channel, programme: programme)
+                Button {
+                    Task {
+                        if await reminders.toggle(channel: channel, programme: programme) == false {
+                            notifyDenied = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: set ? "bell.fill" : "bell")
+                        .foregroundStyle(set ? Color.blue : Color.secondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(set ? "Remove reminder" : "Remind me")
             }
         }
     }

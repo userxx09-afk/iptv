@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct TapperIPadApp: App {
@@ -8,6 +9,8 @@ struct TapperIPadApp: App {
         // to Apple's crash reports. See AppLog.swift.
         AppLog.shared.beginSession()
         MetricKitCollector.shared.start()
+        // So a tapped reminder reaches the app, and shows even while it's open.
+        UNUserNotificationCenter.current().delegate = ReminderCenter.shared
     }
 
     var body: some Scene {
