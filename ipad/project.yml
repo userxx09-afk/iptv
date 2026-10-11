@@ -42,6 +42,12 @@ targets:
       path: Generated/Info.plist
       properties:
         CFBundleDisplayName: "Tapper IPTV"
+        # XcodeGen writes literal "1.0" / "1" for these when they are left out,
+        # which is why TestFlight kept showing v1.0 whatever MARKETING_VERSION
+        # said. Pointing them at the build settings makes the version above
+        # (and the CI build number passed at archive time) actually show up.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
