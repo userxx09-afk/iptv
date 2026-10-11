@@ -76,6 +76,17 @@ class MainActivity : ComponentActivity() {
         val allLiveChannels: List<Channel> = emptyList(),
     )
 
+    // Counts returns to the foreground (not the first start), so the screen
+    // can pull what the other devices watched while this one was away.
+    private var foregroundTick by mutableIntStateOf(0)
+    private var startedOnce = false
+
+    override fun onStart() {
+        super.onStart()
+        if (startedOnce) foregroundTick++
+        startedOnce = true
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as TapperApp
@@ -423,6 +434,16 @@ class MainActivity : ComponentActivity() {
             // before the user starts browsing.
             LaunchedEffect(Unit) {
                 if (app.sync.config().kind != io.tapper.firetv.data.WatchSync.Config.Kind.NONE) {
+                    runSync()
+                }
+            }
+
+            // And again whenever the app comes back to the foreground, so a
+            // film started on the iPad can be resumed here without a restart.
+            LaunchedEffect(foregroundTick) {
+                if (foregroundTick > 0 &&
+                    app.sync.config().kind != io.tapper.firetv.data.WatchSync.Config.Kind.NONE
+                ) {
                     runSync()
                 }
             }
@@ -1003,8 +1024,13 @@ class MainActivity : ComponentActivity() {
                             app.sync.record(
                                 itemId = ch.id,
                                 sourceId = ch.sourceId,
-                                seriesId = seriesContext?.seriesId,
-                                season = seriesContext?.let { ch.number ?: 0 } ?: 0,
+                                // Only episodes belong to a series. seriesContext
+                                // lingers after leaving a show, so without this a
+                                // film played afterwards was tagged with that show.
+                                seriesId = if (ch.id.startsWith("ep-")) seriesContext?.seriesId else null,
+                                season = if (ch.id.startsWith("ep-")) {
+                                    ch.group?.filter { c -> c.isDigit() }?.toIntOrNull() ?: 0
+                                } else 0,
                                 number = ch.number ?: 0,
                                 title = ch.name,
                                 positionMs = pos,
