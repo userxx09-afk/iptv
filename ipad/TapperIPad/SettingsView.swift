@@ -13,6 +13,11 @@ struct SettingsView: View {
     let onDismiss: () -> Void
 
     @State private var buffer = PlayerSettingsStore.shared.bufferSize
+    @ObservedObject private var startup = StartupStore.shared
+    @State private var resumeLast = StartupStore.shared.resumeLast
+    @State private var startTab = StartupStore.shared.startTab
+
+    private let homeNamespaces = ["live", "movie", "series", "playlist"]
 
     var body: some View {
         NavigationStack {
@@ -51,6 +56,57 @@ struct SettingsView: View {
                     Text("Sources")
                 } footer: {
                     Text("Tap a source to load it. Swipe left on one to remove it.")
+                }
+
+                Section {
+                    Picker("When the app opens", selection: $resumeLast) {
+                        Text("Show the channel list").tag(false)
+                        Text("Resume the last channel").tag(true)
+                    }
+                    .onChange(of: resumeLast) { _, newValue in
+                        StartupStore.shared.resumeLast = newValue
+                    }
+                    Picker("Open on", selection: $startTab) {
+                        Text("Live").tag(0)
+                        Text("Movies").tag(1)
+                        Text("Shows").tag(2)
+                    }
+                    .onChange(of: startTab) { _, newValue in
+                        StartupStore.shared.startTab = newValue
+                    }
+                } header: {
+                    Text("On startup")
+                } footer: {
+                    Text("Resume plays the live channel you last started, on the source that is loaded when the app opens. \"Open on\" is the tab shown first for an Xtream source.")
+                }
+
+                Section {
+                    let saved = homeNamespaces.compactMap { ns in
+                        startup.home(for: ns).map { (ns, $0) }
+                    }
+                    if saved.isEmpty {
+                        Text("None set")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(saved, id: \.0) { entry in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(listLabel(entry.0))
+                                Text(homeSummary(entry.1))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Clear", role: .destructive) {
+                                StartupStore.shared.clearHome(for: entry.0)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                } header: {
+                    Text("Starting points")
+                } footer: {
+                    Text("A starting point is the country and category a list opens on. Choose the country and category you want in a list, then tap the \u{22EF} button beside them and \"Make this my starting point\".")
                 }
 
                 Section {

@@ -34,6 +34,13 @@ struct ContentView: View {
     @State private var startupNotice: String?
     @State private var loadEpoch = 0
 
+    /// Tab shown first for an Xtream source (Settings > On startup), and the
+    /// tab currently shown.
+    @State private var selectedTab = StartupStore.shared.startTab
+    /// True only for the load that opens the app - "resume the last channel"
+    /// applies to that one load, never to a source the user switches to.
+    @State private var launchResumePending = false
+
     /// Whatever row was tapped in a live/movie/episode list - drives the
     /// full-screen player. A series row never sets this directly (it has no
     /// stream of its own); only EpisodeListView's rows and this view's own
@@ -163,6 +170,7 @@ struct ContentView: View {
         .onChange(of: xtreamLoader.isLoading) { _, loading in
             guard !loading else { return }
             loadSettled()
+            if pendingSourceSave == nil { resumeLastIfWanted() }
             guard case .xtream(let name, let host, let user, let pass)? = pendingSourceSave else { return }
             if xtreamLoader.isLoggedIn {
                 let id = "xtream-" + String(UUID().uuidString.prefix(8))
@@ -178,6 +186,7 @@ struct ContentView: View {
         .onChange(of: playlistLoader.isLoading) { _, loading in
             guard !loading else { return }
             loadSettled()
+            if pendingSourceSave == nil { resumeLastIfWanted() }
             guard case .m3u(let name, let url, let epg)? = pendingSourceSave else { return }
             if !playlistLoader.channels.isEmpty {
                 let id = "m3u-" + String(UUID().uuidString.prefix(8))
@@ -224,7 +233,31 @@ struct ContentView: View {
                 return
             }
         }
+        launchResumePending = true
         loadSource(active)
+    }
+
+    /// "On startup: resume the last channel". Runs when the launch load
+    /// settles; plays the live channel last started from the lists if it
+    /// belonged to this source and is still in it. Anything else (a failed
+    /// load, a different source, the channel gone) just leaves the list.
+    private func resumeLastIfWanted() {
+        guard launchResumePending else { return }
+        launchResumePending = false
+        guard StartupStore.shared.resumeLast,
+              let last = StartupStore.shared.lastLive,
+              last.sourceId == activeSource.id else { return }
+        // The loaders publish isLoading a moment before the channels land.
+        DispatchQueue.main.async {
+            guard playingChannel == nil else { return }
+            let pool = playlistLoader.channels.isEmpty ? xtreamLoader.liveChannels : playlistLoader.channels
+            guard let channel = pool.first(where: { $0.id == last.channelId }), channel.isPlayable else {
+                AppLog.shared.log("SESSION", "Resume: last channel not found in this source")
+                return
+            }
+            AppLog.shared.log("SESSION", "Resuming \"\(channel.name)\"")
+            playingChannel = channel
+        }
     }
 
     private func beginLoadBreadcrumb(id: String, name: String) {
@@ -287,6 +320,7 @@ struct ContentView: View {
     private func selectSource(_ source: TvSource) {
         SourceStore.shared.activeId = source.id
         activeSource = source
+        launchResumePending = false
         showSettings = false
         playlistLoader.reset()
         xtreamLoader.reset()
@@ -404,13 +438,16 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
             }
-            TabView {
+            TabView(selection: $selectedTab) {
                 channelList(xtreamLoader.liveChannels, namespace: "live")
                     .tabItem { Label("Live", systemImage: "tv") }
+                    .tag(0)
                 channelList(xtreamLoader.movies, namespace: "movie")
                     .tabItem { Label("Movies", systemImage: "film") }
+                    .tag(1)
                 seriesList
                     .tabItem { Label("Shows", systemImage: "tv.badge.wifi") }
+                    .tag(2)
             }
         }
     }
@@ -453,6 +490,12 @@ struct ContentView: View {
         CategoryFilteredList(channels: channels, categoryNamespace: namespace) { channel in
             HStack {
                 Button {
+                    // Remembered for "Resume the last channel" - live
+                    // channels only; a film or episode is not something to
+                    // jump back into at launch.
+                    if namespace == "live" || namespace == "playlist" {
+                        StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: channel.id)
+                    }
                     playingChannel = channel
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
