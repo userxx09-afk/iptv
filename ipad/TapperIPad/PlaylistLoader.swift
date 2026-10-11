@@ -15,6 +15,9 @@ final class PlaylistLoader: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
 
+    /// See XtreamLoader.generation - drops a stale result after a source switch.
+    private var generation = 0
+
     enum LoadError: LocalizedError {
         case invalidUrl
         case badResponse(Int)
@@ -40,6 +43,12 @@ final class PlaylistLoader: ObservableObject {
         }
         errorMessage = nil
         isLoading = true
+        generation += 1
+        let myGeneration = generation
+        let startedAt = Date()
+        let log = AppLog.shared
+        log.log("LOAD", "M3U fetch starting (host \(AppLog.hostOnly(trimmed)))")
+        let stopTicker = log.startMemoryTicker("m3u load")
         // .detached, not a plain Task {} - a plain Task inherits this
         // class's @MainActor isolation, which would run parse() itself on
         // the main thread. M3uParser's own doc comment references a real
@@ -60,20 +69,30 @@ final class PlaylistLoader: ObservableObject {
                 // this is the whole point of sharing it rather than porting
                 // a second implementation.
                 let result = M3uParser.shared.parse(content: text, sourceId: "default")
+                stopTicker()
+                let secs = String(format: "%.1f", Date().timeIntervalSince(startedAt))
+                log.log("LOAD", "M3U parsed after \(secs)s: \(result.channels.count) channels, \(data.count / 1024)KB - \(AppLog.memoryDescription())")
                 await MainActor.run {
-                    self?.channels = result.channels
-                    self?.isLoading = false
+                    guard let self, self.generation == myGeneration else { return }
+                    self.channels = result.channels
+                    self.isLoading = false
                 }
             } catch {
+                stopTicker()
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                log.log("LOAD", "M3U load FAILED: \(message)")
                 await MainActor.run {
-                    self?.errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    self?.isLoading = false
+                    guard let self, self.generation == myGeneration else { return }
+                    self.errorMessage = message
+                    self.isLoading = false
                 }
             }
         }
     }
 
     func reset() {
+        generation += 1
+        isLoading = false
         channels = []
         errorMessage = nil
     }

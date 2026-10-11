@@ -32,6 +32,10 @@ final class XtreamLoader: ObservableObject {
     private var host = ""
     private var username = ""
     private var password = ""
+    /// Bumped by every login() and reset(); a result that arrives for an
+    /// older generation (the user switched source mid-load) is dropped
+    /// instead of overwriting the newer source's catalogue.
+    private var generation = 0
 
     func login(host rawHost: String, username rawUsername: String, password rawPassword: String) {
         let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -47,6 +51,12 @@ final class XtreamLoader: ObservableObject {
         errorMessage = nil
         warnings = []
         isLoading = true
+        generation += 1
+        let myGeneration = generation
+        let startedAt = Date()
+        let log = AppLog.shared
+        log.log("LOAD", "Xtream login + catalogue fetch starting (host \(host))")
+        let stopTicker = log.startMemoryTicker("xtream load")
 
         // Fires on a background thread, not the main thread - see
         // XtreamBridge's own doc comment. Every path back into @Published
@@ -57,13 +67,22 @@ final class XtreamLoader: ObservableObject {
             password: rawPassword,
             sourceId: "xtream-default",
             onWarning: { [weak self] message in
+                AppLog.shared.log("WARN", message)
                 DispatchQueue.main.async {
-                    self?.warnings.append(message)
+                    guard let self, self.generation == myGeneration else { return }
+                    self.warnings.append(message)
                 }
             },
             onResult: { [weak self] result, error in
+                stopTicker()
+                let secs = String(format: "%.1f", Date().timeIntervalSince(startedAt))
+                if let error {
+                    log.log("LOAD", "Xtream load FAILED after \(secs)s: \(error)")
+                } else if let result {
+                    log.log("LOAD", "Xtream data received after \(secs)s: live \(result.live.count), movies \(result.movies.count), shows \(result.series.count) - \(AppLog.memoryDescription())")
+                }
                 DispatchQueue.main.async {
-                    guard let self else { return }
+                    guard let self, self.generation == myGeneration else { return }
                     self.isLoading = false
                     if let error {
                         self.errorMessage = error
@@ -74,6 +93,7 @@ final class XtreamLoader: ObservableObject {
                     self.liveChannels = result.live
                     self.movies = result.movies
                     self.series = result.series
+                    log.log("LOAD", "Xtream catalogue handed to the UI - \(AppLog.memoryDescription())")
                 }
             }
         )
@@ -102,6 +122,8 @@ final class XtreamLoader: ObservableObject {
     }
 
     func reset() {
+        generation += 1
+        isLoading = false
         account = nil
         liveChannels = []
         movies = []

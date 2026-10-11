@@ -40,44 +40,48 @@ struct CategoryFilteredList<RowContent: View>: View {
 
     @State private var selectedCategory: String?
     @State private var showingCategoryPicker = false
+    @State private var index = CategoryIndex.empty
     @ObservedObject private var favorites = FavoritesStore.shared
-
-    private func categoryNames(for channel: Channel) -> [String] {
-        if !channel.categories.isEmpty {
-            return channel.categories.map { $0 }
-        }
-        return [channel.group ?? "Uncategorized"]
-    }
 
     private func isPinned(_ category: String) -> Bool {
         favorites.isPinnedCategory(namespace: categoryNamespace, category: category)
     }
 
+    /// Changes whenever the underlying list is replaced (a different source,
+    /// a reload) - cheap to compare, unlike mapping every id on every redraw.
+    private struct Fingerprint: Equatable {
+        let count: Int
+        let first: String?
+        let last: String?
+    }
+
+    private var fingerprint: Fingerprint {
+        Fingerprint(count: channels.count, first: channels.first?.id, last: channels.last?.id)
+    }
+
     // Pinned categories first (whatever the user has starred in the picker
     // sheet - nothing promoted automatically), then everything else
-    // alphabetically, same as before.
-    private var categories: [String] {
-        var seen = Set<String>()
-        var ordered: [String] = []
-        for channel in channels {
-            for name in categoryNames(for: channel) where !seen.contains(name) {
-                seen.insert(name)
-                ordered.append(name)
-            }
-        }
-        let pinned = ordered.filter(isPinned).sorted()
-        let rest = ordered.filter { !isPinned($0) }.sorted()
+    // alphabetically, same as before. Only evaluated while the picker sheet
+    // is actually open.
+    private var orderedCategories: [String] {
+        let pinned = index.names.filter(isPinned)
+        let rest = index.names.filter { !isPinned($0) }
         return pinned + rest
     }
 
-    private var hasFavorites: Bool { favorites.hasAnyFavorite(in: channels) }
+    // "Anything starred anywhere", not "anything starred in this list": the
+    // exact check meant walking the whole catalogue (every row crossing the
+    // Kotlin/Swift boundary) on every redraw, which is what made big
+    // sources sluggish and memory-hungry.
+    private var hasFavorites: Bool { favorites.hasAnyFavorites }
 
     private var filtered: [Channel] {
         if selectedCategory == favoritesPseudoCategory {
             return channels.filter { favorites.isFavorite(sourceId: $0.sourceId, channelId: $0.id) }
         }
-        guard let selectedCategory else { return channels }
-        return channels.filter { categoryNames(for: $0).contains(selectedCategory) }
+        guard let selectedCategory, let positions = index.members[selectedCategory] else { return channels }
+        let total = channels.count
+        return positions.compactMap { $0 < total ? channels[$0] : nil }
     }
 
     var body: some View {
@@ -87,7 +91,7 @@ struct CategoryFilteredList<RowContent: View>: View {
             // e.g. unstarring the last favorite while viewing Favorites,
             // which drops hasFavorites to false but shouldn't strand the
             // user on an empty list with no way back to "All Categories".
-            if categories.count > 1 || hasFavorites || selectedCategory != nil {
+            if index.names.count > 1 || hasFavorites || selectedCategory != nil {
                 categoryBar
                 Divider()
             }
@@ -99,11 +103,11 @@ struct CategoryFilteredList<RowContent: View>: View {
             // resetting here keeps a stale filter from hiding everything.
             // Favorites isn't a real category name, so it's checked
             // separately rather than against the `categories` list.
-            .onChange(of: channels.map(\.id)) { _, _ in
+            .onChange(of: index.names) { _, names in
                 guard let selectedCategory else { return }
                 if selectedCategory == favoritesPseudoCategory {
                     if !hasFavorites { self.selectedCategory = nil }
-                } else if !categories.contains(selectedCategory) {
+                } else if !names.contains(selectedCategory) {
                     self.selectedCategory = nil
                 }
             }
@@ -117,10 +121,23 @@ struct CategoryFilteredList<RowContent: View>: View {
                 }
             }
         }
+        // Grouping a big catalogue by category touches every item once;
+        // done on a background thread and only when the list changes, never
+        // as part of drawing.
+        .task(id: fingerprint) {
+            let snapshot = channels
+            let started = Date()
+            let built = await Task.detached(priority: .userInitiated) {
+                CategoryIndex.build(snapshot)
+            }.value
+            index = built
+            let secs = String(format: "%.2f", Date().timeIntervalSince(started))
+            AppLog.shared.log("UI", "\(categoryNamespace): grouped \(snapshot.count) items into \(built.names.count) categories in \(secs)s - \(AppLog.memoryDescription())")
+        }
         .sheet(isPresented: $showingCategoryPicker) {
             CategoryPickerSheet(
                 categoryNamespace: categoryNamespace,
-                categories: categories,
+                categories: orderedCategories,
                 showFavoritesOption: hasFavorites,
                 selected: selectedCategory
             ) { choice in
@@ -167,7 +184,7 @@ struct CategoryFilteredList<RowContent: View>: View {
 
             Spacer()
 
-            Text("\(categories.count) categories")
+            Text("\(index.names.count) categories")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -291,5 +308,35 @@ private struct CategoryPickerSheet: View {
             }
             .buttonStyle(.plain)
         }
+    }
+}
+
+/// Items grouped by category, as positions into the source array rather than
+/// copies of it. Built once per list (off the main thread) so that scrolling,
+/// toggling a star or opening the picker never re-walks the whole catalogue.
+///
+/// Falls back to `group` when `categories` is empty - Xtream sources
+/// populate categories directly, but a plain M3U channel only ever has
+/// group-title.
+private struct CategoryIndex: Equatable {
+    var names: [String] = []
+    var members: [String: [Int]] = [:]
+
+    static let empty = CategoryIndex()
+
+    static func build(_ channels: [Channel]) -> CategoryIndex {
+        var members: [String: [Int]] = [:]
+        for (i, channel) in channels.enumerated() {
+            let cats = channel.categories
+            if cats.isEmpty {
+                members[channel.group ?? "Uncategorized", default: []].append(i)
+            } else {
+                var seen = Set<String>()
+                for c in cats where seen.insert(c).inserted {
+                    members[c, default: []].append(i)
+                }
+            }
+        }
+        return CategoryIndex(names: members.keys.sorted(), members: members)
     }
 }

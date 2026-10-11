@@ -1,36 +1,37 @@
 import SwiftUI
 import TapperCore
 
-/// Two ways in: a plain M3U playlist URL (Phase 3's original screen), or an
-/// Xtream Codes panel login (host/username/password) unlocking three real
-/// catalogues - live channels, movies, shows. Live/movie/playlist rows stay
-/// plain (not NavigationLinks) because tapping one still doesn't do
-/// anything yet - playback is further out. Shows are the one exception:
-/// tapping a series has to lead somewhere (its episode list) for the
-/// screen to mean anything at all, so that single row type is a
-/// NavigationLink - see EpisodeListView's own doc comment.
+/// The app shell, laid out like Fire TV: the app opens straight into the
+/// active source (loading it automatically), browsing is the home screen, and
+/// everything about sources lives under Settings - pick, add or remove a
+/// source there, set buffering, read the logs. A source menu in the toolbar
+/// switches source without leaving the browse screen.
 ///
-/// "Sources" (toolbar) is the persisted counterpart to the form above -
-/// mirrors Fire TV's AddSourceScreen + SourceStore: saved sources survive
-/// relaunch, Xtream credentials live in the Keychain (CredentialVault), and
-/// switching sources re-authenticates/reloads instead of retyping
-/// everything. The quick-connect form stays as-is alongside it as an
-/// unsaved, one-off path - nothing about it changes here.
+/// Crash safety: loading a source writes a breadcrumb (see AppLog). If the app
+/// dies mid-load, the next launch does NOT blindly load that same source again
+/// (which would just crash-loop); it opens to a short explanation instead, and
+/// Settings > Logs holds the details.
+///
+/// Live/movie/playlist rows stay plain buttons that open the player. Shows are
+/// the exception: a series has no stream of its own, so its row is a
+/// NavigationLink into EpisodeListView.
 struct ContentView: View {
     @StateObject private var playlistLoader = PlaylistLoader()
     @StateObject private var xtreamLoader = XtreamLoader()
-    @State private var mode: SourceMode = .playlist
-
-    @State private var urlText: String = ""
-    @State private var xtreamHost: String = ""
-    @State private var xtreamUsername: String = ""
-    @State private var xtreamPassword: String = ""
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var sources: [TvSource] = SourceStore.shared.all()
-    @State private var activeSheet: ActiveSheet?
+    @State private var activeSource: TvSource = SourceStore.shared.active()
+
+    @State private var showSettings = false
+    @State private var showAddSource = false
     @State private var addSourceBusy = false
     @State private var addSourceError: String?
     @State private var pendingSourceSave: PendingSourceSave?
+
+    @State private var startupDone = false
+    @State private var startupNotice: String?
+    @State private var loadEpoch = 0
 
     /// Whatever row was tapped in a live/movie/episode list - drives the
     /// full-screen player. A series row never sets this directly (it has no
@@ -39,79 +40,61 @@ struct ContentView: View {
     /// conformance, required for `.fullScreenCover(item:)` below.
     @State private var playingChannel: Channel?
 
-    private enum SourceMode: String, CaseIterable, Identifiable {
-        case playlist = "Playlist URL"
-        case xtream = "Xtream Login"
-        var id: String { rawValue }
-    }
-
-    private enum ActiveSheet: Identifiable {
-        case sources
-        case addSource
-        var id: Int { hashValue }
-    }
-
     /// What's waiting on the in-flight load started from AddSourceView, so
     /// the onChange handlers below know what to persist once it finishes -
-    /// and can tell that load apart from one started by the quick-connect
-    /// form, which never sets this.
+    /// and can tell that load apart from an ordinary source switch, which
+    /// never sets this.
     private enum PendingSourceSave {
         case xtream(name: String, host: String, user: String, pass: String)
         case m3u(name: String, url: String, epg: String?)
     }
 
-    private var hasContent: Bool {
-        !playlistLoader.channels.isEmpty || xtreamLoader.isLoggedIn
+    private var isLoading: Bool { playlistLoader.isLoading || xtreamLoader.isLoading }
+
+    private var currentError: String? {
+        activeSource.kind == .xtream ? xtreamLoader.errorMessage : playlistLoader.errorMessage
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if !hasContent {
-                    loadForm
-                } else if !playlistLoader.channels.isEmpty {
+                if !playlistLoader.channels.isEmpty {
                     channelList(playlistLoader.channels, namespace: "playlist")
-                } else {
+                } else if xtreamLoader.isLoggedIn {
                     xtreamTabs
+                } else {
+                    emptyState
                 }
             }
-            .navigationTitle(
-                !playlistLoader.channels.isEmpty
-                    ? "\(playlistLoader.channels.count) Channels"
-                    : "Tapper IPTV"
-            )
+            .navigationTitle(activeSource.name)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Sources") { activeSheet = .sources }
+                ToolbarItem(placement: .topBarLeading) {
+                    sourceMenu
                 }
-                // A per-stream preference, not tied to whether a source is
-                // loaded - shown alongside Sources rather than gated on
-                // hasContent, so it's there to set before connecting too.
                 ToolbarItem(placement: .topBarTrailing) {
-                    bufferingMenu
-                }
-                if hasContent {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("New Source") { resetAll() }
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
                     }
                 }
             }
         }
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .sources:
-                SourceListView(
-                    sources: sources,
-                    activeId: SourceStore.shared.activeId,
-                    onSelect: { selectSource($0) },
-                    onRemove: { removeSource($0) },
-                    onAddTapped: {
-                        addSourceError = nil
-                        activeSheet = .addSource
-                    },
-                    onDismiss: { activeSheet = nil }
-                )
-            case .addSource:
+        .task { startupLoad() }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(
+                sources: sources,
+                activeId: activeSource.id,
+                onSelect: { selectSource($0) },
+                onRemove: { removeSource($0) },
+                onAddTapped: {
+                    addSourceError = nil
+                    showAddSource = true
+                },
+                onDismiss: { showSettings = false }
+            )
+            .sheet(isPresented: $showAddSource) {
                 AddSourceView(
                     busy: addSourceBusy,
                     error: addSourceError,
@@ -119,72 +102,70 @@ struct ContentView: View {
                         addSourceError = nil
                         addSourceBusy = true
                         pendingSourceSave = .xtream(name: name, host: host, user: user, pass: pass)
+                        beginLoadBreadcrumb(id: "new-source", name: name.isEmpty ? host : name)
                         xtreamLoader.login(host: host, username: user, password: pass)
+                        if !xtreamLoader.isLoading { failPendingSave(xtreamLoader.errorMessage) }
                     },
                     onSubmitM3u: { name, url, epg in
                         addSourceError = nil
                         addSourceBusy = true
                         pendingSourceSave = .m3u(name: name, url: url, epg: epg)
+                        beginLoadBreadcrumb(id: "new-source", name: name.isEmpty ? "Playlist" : name)
                         playlistLoader.load(urlString: url)
+                        if !playlistLoader.isLoading { failPendingSave(playlistLoader.errorMessage) }
                     },
                     onCancel: {
                         pendingSourceSave = nil
                         addSourceBusy = false
                         addSourceError = nil
-                        activeSheet = nil
+                        showAddSource = false
                     }
                 )
             }
         }
         // Reuses XtreamLoader's existing authenticate+load flow rather than
         // adding a separate auth-only entry point on the bridge - it already
-        // validates the login and leaves the app ready to browse on success,
-        // so a second code path just for AddSourceView isn't worth the extra
-        // surface. Guarded on pendingSourceSave so the quick-connect form's
-        // own login (which never sets it) is untouched by this.
-        .onChange(of: xtreamLoader.isLoading) { _, isLoading in
-            guard !isLoading, case .xtream(let name, let host, let user, let pass)? = pendingSourceSave else { return }
+        // validates the login and leaves the app ready to browse on success.
+        // Guarded on pendingSourceSave so ordinary source switches are
+        // untouched by the saving part.
+        .onChange(of: xtreamLoader.isLoading) { _, loading in
+            guard !loading else { return }
+            loadSettled()
+            guard case .xtream(let name, let host, let user, let pass)? = pendingSourceSave else { return }
             if xtreamLoader.isLoggedIn {
                 let id = "xtream-" + String(UUID().uuidString.prefix(8))
                 CredentialVault.put(sourceId: id, username: user, password: pass)
-                SourceStore.shared.add(
+                finishAdding(
                     TvSource(id: id, name: name.isEmpty ? host : name, kind: .xtream, location: host, epgUrlOverride: nil, builtIn: false)
                 )
-                SourceStore.shared.activeId = id
-                sources = SourceStore.shared.all()
-                mode = .xtream
-                xtreamHost = host
-                xtreamUsername = user
-                xtreamPassword = pass
-                pendingSourceSave = nil
-                addSourceBusy = false
-                addSourceError = nil
-                activeSheet = nil
+                playlistLoader.reset()
             } else {
-                addSourceBusy = false
-                addSourceError = xtreamLoader.errorMessage ?? "Couldn't connect."
-                pendingSourceSave = nil
+                failPendingSave(xtreamLoader.errorMessage ?? "Couldn't connect.")
             }
         }
-        .onChange(of: playlistLoader.isLoading) { _, isLoading in
-            guard !isLoading, case .m3u(let name, let url, let epg)? = pendingSourceSave else { return }
+        .onChange(of: playlistLoader.isLoading) { _, loading in
+            guard !loading else { return }
+            loadSettled()
+            guard case .m3u(let name, let url, let epg)? = pendingSourceSave else { return }
             if !playlistLoader.channels.isEmpty {
                 let id = "m3u-" + String(UUID().uuidString.prefix(8))
-                SourceStore.shared.add(
+                finishAdding(
                     TvSource(id: id, name: name.isEmpty ? "Playlist" : name, kind: .m3u, location: url, epgUrlOverride: epg, builtIn: false)
                 )
-                SourceStore.shared.activeId = id
-                sources = SourceStore.shared.all()
-                mode = .playlist
-                urlText = url
-                pendingSourceSave = nil
-                addSourceBusy = false
-                addSourceError = nil
-                activeSheet = nil
+                xtreamLoader.reset()
             } else {
-                addSourceBusy = false
-                addSourceError = playlistLoader.errorMessage ?? "Couldn't load this playlist."
-                pendingSourceSave = nil
+                failPendingSave(playlistLoader.errorMessage ?? "Couldn't load this playlist.")
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                AppLog.shared.log("SESSION", "Moved to background - \(AppLog.memoryDescription())")
+                AppLog.shared.markBackgrounded()
+            case .active:
+                AppLog.shared.markForegrounded()
+            default:
+                break
             }
         }
         .fullScreenCover(item: $playingChannel) { channel in
@@ -192,150 +173,188 @@ struct ContentView: View {
         }
     }
 
-    private func resetAll() {
-        playlistLoader.reset()
-        xtreamLoader.reset()
-        urlText = ""
-        xtreamHost = ""
-        xtreamUsername = ""
-        xtreamPassword = ""
+    // MARK: - Loading
+
+    /// Opens straight into the active source - unless the previous run died
+    /// while loading it, in which case it waits for the user instead of
+    /// crash-looping.
+    private func startupLoad() {
+        guard !startupDone else { return }
+        startupDone = true
+        let active = SourceStore.shared.active()
+        activeSource = active
+
+        if let badId = AppLog.shared.interruptedLoadSourceId {
+            let badName = SourceStore.shared.all().first { $0.id == badId }?.name ?? badId
+            AppLog.shared.log("SESSION", "Auto-load skipped: last run died while loading \"\(badName)\"")
+            if badId == active.id || badId == "new-source" {
+                startupNotice = "The app closed unexpectedly while loading \"\(badName)\", so it was not loaded automatically this time. You can try it again, choose a different source, or open Settings > Logs to see what happened."
+                return
+            }
+        }
+        loadSource(active)
+    }
+
+    private func beginLoadBreadcrumb(id: String, name: String) {
+        loadEpoch += 1
+        AppLog.shared.loadStarted(sourceId: id, name: name)
+    }
+
+    private func loadSource(_ source: TvSource) {
+        startupNotice = nil
+        beginLoadBreadcrumb(id: source.id, name: source.name)
+        switch source.kind {
+        case .m3u:
+            playlistLoader.load(urlString: source.location)
+            if !playlistLoader.isLoading { AppLog.shared.loadFinished() }
+        case .xtream:
+            guard let creds = CredentialVault.get(sourceId: source.id) else {
+                AppLog.shared.log("LOAD", "No saved login found for \"\(source.name)\"")
+                AppLog.shared.loadFinished()
+                xtreamLoader.errorMessage = "The saved login for this source is missing. Remove it in Settings and add it again."
+                return
+            }
+            xtreamLoader.login(host: source.location, username: creds.username, password: creds.password)
+            if !xtreamLoader.isLoading { AppLog.shared.loadFinished() }
+        }
+    }
+
+    /// A load finished (well or badly). The breadcrumb is kept for a few more
+    /// seconds: the heavy part for a big source is often drawing it, right
+    /// after the data arrives, and a crash then should still be attributed to
+    /// this load.
+    private func loadSettled() {
+        let epoch = loadEpoch
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            if epoch == loadEpoch { AppLog.shared.loadFinished() }
+        }
+    }
+
+    private func finishAdding(_ source: TvSource) {
+        SourceStore.shared.add(source)
+        SourceStore.shared.activeId = source.id
+        sources = SourceStore.shared.all()
+        activeSource = source
+        pendingSourceSave = nil
+        addSourceBusy = false
+        addSourceError = nil
+        startupNotice = nil
+        showAddSource = false
+        showSettings = false
+    }
+
+    private func failPendingSave(_ message: String?) {
+        addSourceBusy = false
+        addSourceError = message ?? "Couldn't connect."
+        pendingSourceSave = nil
     }
 
     /// Switches the active saved source and loads it - M3U just needs its
     /// stored URL, Xtream needs its Keychain-held credentials alongside the
-    /// stored host. A source added before credentials could be looked up
-    /// (shouldn't happen via AddSourceView, but guards against a source
-    /// surviving a Keychain wipe/reinstall) silently does nothing rather
-    /// than crash.
+    /// stored host.
     private func selectSource(_ source: TvSource) {
         SourceStore.shared.activeId = source.id
-        activeSheet = nil
+        activeSource = source
+        showSettings = false
         playlistLoader.reset()
         xtreamLoader.reset()
-        switch source.kind {
-        case .m3u:
-            mode = .playlist
-            urlText = source.location
-            playlistLoader.load(urlString: source.location)
-        case .xtream:
-            guard let creds = CredentialVault.get(sourceId: source.id) else { return }
-            mode = .xtream
-            xtreamHost = source.location
-            xtreamUsername = creds.username
-            xtreamPassword = creds.password
-            xtreamLoader.login(host: source.location, username: creds.username, password: creds.password)
-        }
+        loadSource(source)
     }
 
     private func removeSource(_ source: TvSource) {
         SourceStore.shared.remove(id: source.id)
         CredentialVault.delete(sourceId: source.id)
         sources = SourceStore.shared.all()
+        if source.id == activeSource.id {
+            let next = SourceStore.shared.active()
+            selectSource(next)
+        }
     }
 
-    private var loadForm: some View {
-        VStack(spacing: 20) {
-            Picker("Source", selection: $mode) {
-                ForEach(SourceMode.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 480)
+    // MARK: - Screens
 
-            if mode == .playlist {
-                playlistForm
+    private var sourceMenu: some View {
+        Menu {
+            ForEach(sources) { source in
+                Button {
+                    selectSource(source)
+                } label: {
+                    if source.id == activeSource.id {
+                        Label(source.name, systemImage: "checkmark")
+                    } else {
+                        Text(source.name)
+                    }
+                }
+            }
+            Divider()
+            Button {
+                showSettings = true
+            } label: {
+                Label("Manage sources...", systemImage: "gearshape")
+            }
+        } label: {
+            Label("Sources", systemImage: "tray.full")
+        }
+    }
+
+    /// Shown while nothing is loaded: loading progress, or what went wrong,
+    /// with the way forward either way.
+    private var emptyState: some View {
+        VStack(spacing: 18) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.large)
+                Text("Loading \(activeSource.name)...")
+                    .font(.headline)
+                Text("A large provider can take a minute or two.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if !xtreamLoader.warnings.isEmpty {
+                    Text(xtreamLoader.warnings.joined(separator: "\n"))
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 520)
+                }
             } else {
-                xtreamForm
+                Image(systemName: "tv")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.secondary)
+                Text("Tapper IPTV")
+                    .font(.largeTitle.bold())
+
+                if let startupNotice {
+                    Text(startupNotice)
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 520)
+                } else if let error = currentError {
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 520)
+                } else {
+                    Text("Choose a source to start watching.")
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 16) {
+                    Button("Load \(activeSource.name)") {
+                        loadSource(activeSource)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Sources & Logs") {
+                        showSettings = true
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var playlistForm: some View {
-        VStack(spacing: 16) {
-            Text("Paste an M3U playlist URL to load real channels.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            TextField("https://example.com/playlist.m3u", text: $urlText)
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-                .frame(maxWidth: 480)
-                .onSubmit { playlistLoader.load(urlString: urlText) }
-
-            Button {
-                playlistLoader.load(urlString: urlText)
-            } label: {
-                if playlistLoader.isLoading {
-                    ProgressView()
-                } else {
-                    Text("Load Playlist")
-                }
-            }
-            .disabled(urlText.isEmpty || playlistLoader.isLoading)
-
-            if let error = playlistLoader.errorMessage {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 480)
-            }
-        }
-    }
-
-    private var xtreamForm: some View {
-        VStack(spacing: 16) {
-            Text("Log in with your Xtream Codes panel details.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            TextField("Host, e.g. http://example.com:8080", text: $xtreamHost)
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-                .frame(maxWidth: 480)
-
-            TextField("Username", text: $xtreamUsername)
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .frame(maxWidth: 480)
-
-            SecureField("Password", text: $xtreamPassword)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 480)
-                .onSubmit(attemptXtreamLogin)
-
-            Button(action: attemptXtreamLogin) {
-                if xtreamLoader.isLoading {
-                    ProgressView()
-                } else {
-                    Text("Log In")
-                }
-            }
-            .disabled(
-                xtreamHost.isEmpty || xtreamUsername.isEmpty || xtreamPassword.isEmpty
-                    || xtreamLoader.isLoading
-            )
-
-            if let error = xtreamLoader.errorMessage {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 480)
-            }
-        }
-    }
-
-    private func attemptXtreamLogin() {
-        xtreamLoader.login(host: xtreamHost, username: xtreamUsername, password: xtreamPassword)
     }
 
     private var xtreamTabs: some View {
@@ -392,9 +411,8 @@ struct ContentView: View {
     // Live and movie rows do have a stream, so - unlike seriesList above -
     // each row is a plain Button that opens PlayerView directly rather than
     // navigating anywhere. isPlayable guards against the handful of
-    // mms/mmsh/rtmp/rtsp entries M3uParser already flags as unplayable (see
-    // its own doc comment) so tapping one shows a greyed-out row instead of
-    // a silent no-op or a PlayerView that can only fail immediately.
+    // mms/mmsh/rtmp/rtsp entries M3uParser already flags as unplayable so
+    // tapping one shows a greyed-out row instead of a silent no-op.
     // categoryNamespace is a plain String (not Channel.kind) because the
     // same function serves Live, Movies and the M3U playlist list, and this
     // avoids relying on how a Kotlin enum bridges into Swift for something
@@ -420,28 +438,6 @@ struct ContentView: View {
                 Spacer()
                 FavoriteButton(sourceId: channel.sourceId, channelId: channel.id)
             }
-        }
-    }
-
-    // One menu, not a full Settings screen - there isn't one yet for iPad.
-    // Takes effect on the next stream start (TapperPlayer.swift reads it
-    // fresh each time), not whatever's already playing - same as Fire TV's
-    // equivalent control.
-    private var bufferingMenu: some View {
-        Menu {
-            ForEach(BufferSize.allCases) { size in
-                Button {
-                    PlayerSettingsStore.shared.bufferSize = size
-                } label: {
-                    if PlayerSettingsStore.shared.bufferSize == size {
-                        Label(size.label, systemImage: "checkmark")
-                    } else {
-                        Text(size.label)
-                    }
-                }
-            }
-        } label: {
-            Label("Buffering", systemImage: "antenna.radiowaves.left.and.right")
         }
     }
 }

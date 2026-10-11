@@ -48,6 +48,11 @@ final class FavoritesStore: ObservableObject {
         defaults.set(Array(favoriteIds), forKey: favoritesKey)
     }
 
+    /// Cheap "is anything starred at all" - used instead of scanning a whole
+    /// catalogue (tens of thousands of bridged Kotlin objects) on every
+    /// redraw just to decide whether to offer the Favorites filter.
+    var hasAnyFavorites: Bool { !favoriteIds.isEmpty }
+
     func hasAnyFavorite(in channels: [Channel]) -> Bool {
         channels.contains { isFavorite(sourceId: $0.sourceId, channelId: $0.id) }
     }
