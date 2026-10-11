@@ -159,6 +159,7 @@ struct PlayerView: View {
         .onDisappear {
             hideTask?.cancel()
             recorder.stop()
+            if !isLive { SyncManager.shared.syncSoon(reason: "player closed") }
             controller.release()
         }
         .onChange(of: controller.isBuffering) { _, buffering in

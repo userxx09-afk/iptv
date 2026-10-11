@@ -18,6 +18,19 @@ struct WatchEntry: Codable, Identifiable, Equatable {
     var watched: Bool
     var updated: Date
 
+    // Sync. Optional so progress saved before sync existed still loads.
+    /// Lamport clock shared with Fire TV: orders changes between devices
+    /// whatever either device thinks the time is.
+    var clock: Int64? = nil
+    /// Which device last changed this. Only that device publishes it.
+    var device: String? = nil
+    var season: Int? = nil
+    var number: Int? = nil
+    /// Set when this device deliberately cleared the entry (remove, mark as
+    /// unwatched). Older copies arriving from other devices are ignored, so
+    /// the clear is not undone by the next sync.
+    var resetClock: Int64? = nil
+
     /// Complete at 92%, or with under two minutes left, whichever comes
     /// first - the same rule as Fire TV. 92% of a three-hour film still
     /// leaves fourteen minutes, and nobody who sat through the credits wants
@@ -56,6 +69,8 @@ final class WatchStore: ObservableObject {
     private let url: URL
     private var saveWork: DispatchWorkItem?
     private let maxEntries = 500
+    private let deviceId = SyncDevice.id
+    private var highClock: Int64 = 0
 
     private init() {
         let fm = FileManager.default
@@ -67,6 +82,28 @@ final class WatchStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([WatchEntry].self, from: data) {
             for entry in decoded { entries[entry.id] = entry }
         }
+        // Progress saved before sync existed: it all belongs to this device.
+        for (key, var entry) in Array(entries) where entry.clock == nil {
+            entry.clock = Int64(entry.updated.timeIntervalSince1970 * 1000)
+            entry.device = deviceId
+            entries[key] = entry
+        }
+        highClock = entries.values.compactMap { $0.clock }.max() ?? 0
+    }
+
+    /// A Lamport clock: the wall clock, but never behind anything seen so far
+    /// (including other devices' changes), so a change made here always sorts
+    /// after what it was based on.
+    private func nextClock() -> Int64 {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        highClock = max(now, highClock + 1)
+        return highClock
+    }
+
+    private static func seasonNumber(from group: String?) -> Int? {
+        guard let group else { return nil }
+        let digits = group.filter { $0.isNumber }
+        return digits.isEmpty ? nil : Int(digits)
     }
 
     static var currentSourceId: String { SourceStore.shared.activeId }
@@ -104,13 +141,22 @@ final class WatchStore: ObservableObject {
         entry.seriesTitle = series?.name
         if duration > 0 { entry.durationSec = duration }
         entry.updated = Date()
+        entry.clock = nextClock()
+        entry.device = deviceId
+        if series != nil {
+            entry.season = Self.seasonNumber(from: channel.group)
+            entry.number = channel.number.map { Int(truncating: $0) }
+        }
 
         if WatchEntry.isFinished(position: position, duration: entry.durationSec) {
             entry.watched = true
             entry.positionSec = 0
         } else {
             // Watching a finished item again puts it back in progress.
-            if entry.watched && position > 30 { entry.watched = false }
+            if entry.watched && position > 30 {
+                entry.watched = false
+                entry.resetClock = entry.clock
+            }
             entry.positionSec = position
         }
         entries[k] = entry
@@ -129,15 +175,35 @@ final class WatchStore: ObservableObject {
         entry.watched = watched
         entry.positionSec = 0
         entry.updated = Date()
+        entry.clock = nextClock()
+        entry.device = deviceId
+        if !watched { entry.resetClock = entry.clock }
         entries[k] = entry
         scheduleSave()
         revision += 1
     }
 
+    /// Forgets progress. With sync on, the entry is kept but cleared (and
+    /// stamped), so another device's older copy can't bring it back.
     func remove(id: String) {
-        entries[id] = nil
+        reset(id: id)
         scheduleSave()
         revision += 1
+    }
+
+    private func reset(id: String) {
+        guard var entry = entries[id] else { return }
+        if !SyncConfig.isConfigured {
+            entries[id] = nil
+            return
+        }
+        entry.positionSec = 0
+        entry.watched = false
+        entry.updated = Date()
+        entry.clock = nextClock()
+        entry.device = deviceId
+        entry.resetClock = entry.clock
+        entries[id] = entry
     }
 
     func removeEntry(channelId: String) {
@@ -145,9 +211,136 @@ final class WatchStore: ObservableObject {
     }
 
     func clearAll() {
-        entries = [:]
+        for id in Array(entries.keys) { reset(id: id) }
         scheduleSave()
         revision += 1
+    }
+
+    /// Writes pending changes now - for when the app goes to the background.
+    func flush() {
+        saveWork?.cancel()
+        save()
+    }
+
+    // MARK: - Sync with other devices
+
+    /// This device's progress, in the file format Fire TV reads and writes
+    /// (positions in milliseconds, one file per device). Only entries this
+    /// device last changed go in - everything else is published by the
+    /// device that made it.
+    func exportOwn(label: String) -> Data {
+        let mine = entries.values
+            .filter { $0.device == deviceId && $0.clock != nil }
+            .sorted { ($0.clock ?? 0) > ($1.clock ?? 0) }
+        let rows: [[String: Any]] = mine.map { e in
+            var series: Any = NSNull()
+            if let sid = e.seriesId, !sid.isEmpty {
+                series = sid.hasPrefix("series-") ? String(sid.dropFirst("series-".count)) : sid
+            }
+            return [
+                "item": e.channelId,
+                "source": e.appSourceId,
+                "series": series,
+                "season": e.season ?? 0,
+                "number": e.number ?? 0,
+                "title": e.title,
+                "pos": Int64((e.positionSec * 1000).rounded()),
+                "dur": Int64((e.durationSec * 1000).rounded()),
+                "watched": e.watched,
+                "clock": e.clock ?? 0,
+                "device": deviceId,
+            ]
+        }
+        let root: [String: Any] = [
+            "version": 1,
+            "device": deviceId,
+            "label": label,
+            "written": Int64(Date().timeIntervalSince1970 * 1000),
+            "entries": rows,
+        ]
+        return (try? JSONSerialization.data(withJSONObject: root)) ?? Data("{}".utf8)
+    }
+
+    /// Merges another device's file. Same rules as Fire TV, so every device
+    /// ends up with the same answer whatever order they sync in: watched
+    /// never reverts, the newer change wins, and a finished item has no
+    /// position.
+    func importShard(_ data: Data) -> (changed: Int, label: String?) {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return (0, nil)
+        }
+        let label = root["label"] as? String
+        let shardDevice = root["device"] as? String ?? ""
+        guard let list = root["entries"] as? [[String: Any]] else { return (0, label) }
+
+        let knownSources = Set(SourceStore.shared.all().map { $0.id })
+        let active = Self.currentSourceId
+        let now = Date()
+        var changed = 0
+
+        func int(_ any: Any?) -> Int64 { (any as? NSNumber)?.int64Value ?? 0 }
+
+        for o in list {
+            guard let item = o["item"] as? String, !item.isEmpty else { continue }
+            // A source this iPad doesn't know (Fire TV's ids are its own)
+            // is filed under the one in use, so it still shows up.
+            var source = o["source"] as? String ?? ""
+            if !knownSources.contains(source) { source = active }
+
+            var seriesId: String?
+            if let raw = o["series"] as? String, !raw.isEmpty, raw != "null" {
+                seriesId = raw.hasPrefix("series-") ? raw : "series-" + raw
+            }
+            let clock = int(o["clock"])
+            highClock = max(highClock, clock)
+            let stamp = min(Date(timeIntervalSince1970: Double(clock) / 1000), now)
+            let device = (o["device"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? shardDevice
+
+            let remote = WatchEntry(
+                id: "\(source)|\(item)", appSourceId: source, channelId: item,
+                title: o["title"] as? String ?? "",
+                seriesId: seriesId, seriesTitle: nil,
+                positionSec: Double(int(o["pos"])) / 1000,
+                durationSec: Double(int(o["dur"])) / 1000,
+                watched: (o["watched"] as? Bool) ?? false,
+                updated: stamp,
+                clock: clock, device: device,
+                season: Int(int(o["season"])), number: Int(int(o["number"]))
+            )
+            if merge(remote) { changed += 1 }
+        }
+        if changed > 0 {
+            scheduleSave()
+            revision += 1
+        }
+        return (changed, label)
+    }
+
+    private func merge(_ remote: WatchEntry) -> Bool {
+        guard let local = entries[remote.id] else {
+            entries[remote.id] = remote
+            return true
+        }
+        let remoteClock = remote.clock ?? 0
+        let localClock = local.clock ?? 0
+        // Cleared here on purpose, after this copy was made.
+        if let reset = local.resetClock, remoteClock <= reset { return false }
+
+        let watched = local.watched || remote.watched
+        var merged = remoteClock >= localClock ? remote : local
+        merged.watched = watched
+        merged.durationSec = max(local.durationSec, remote.durationSec)
+        merged.positionSec = watched ? 0 : merged.positionSec
+        merged.clock = max(localClock, remoteClock)
+        // Details only this iPad knows survive a merge.
+        merged.seriesTitle = merged.seriesTitle ?? local.seriesTitle
+        merged.seriesId = merged.seriesId ?? local.seriesId
+        merged.resetClock = local.resetClock
+        if merged.title.isEmpty { merged.title = local.title }
+
+        if merged == local { return false }
+        entries[remote.id] = merged
+        return true
     }
 
     private func scheduleSave() {

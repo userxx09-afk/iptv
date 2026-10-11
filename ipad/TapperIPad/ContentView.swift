@@ -226,12 +226,18 @@ struct ContentView: View {
             case .background:
                 AppLog.shared.log("SESSION", "Moved to background - \(AppLog.memoryDescription())")
                 AppLog.shared.markBackgrounded()
+                WatchStore.shared.flush()
             case .active:
                 AppLog.shared.markForegrounded()
                 EpgManager.shared.reloadNow()
+                Task { await SyncManager.shared.syncIfStale(seconds: 20) }
             default:
                 break
             }
+        }
+        .task {
+            // Catch up with the other devices as soon as the app opens.
+            await SyncManager.shared.syncIfStale(seconds: 0)
         }
         .fullScreenCover(item: $playingChannel) { channel in
             PlayerView(

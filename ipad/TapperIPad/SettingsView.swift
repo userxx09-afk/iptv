@@ -156,13 +156,23 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        SyncSettingsView()
+                    } label: {
+                        HStack {
+                            Label("Sync with other devices", systemImage: "arrow.triangle.2.circlepath")
+                            Spacer()
+                            Text(SyncConfig.isConfigured ? "On" : "Off")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     Button("Clear watch history", role: .destructive) {
                         confirmClearWatch = true
                     }
                 } header: {
                     Text("Watch history")
                 } footer: {
-                    Text("Films and episodes remember where you stopped, and show under Continue. This clears all of it.")
+                    Text("Films and episodes remember where you stopped, and show under Continue. Turn on sync to resume them on your Fire TV, and the other way round.")
                 }
 
                 Section {

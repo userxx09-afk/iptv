@@ -113,6 +113,13 @@ struct ContinueWatchingView: View {
         .task(id: ResolveKey(revision: watch.revision, movies: loader.movies.count, shows: loader.series.count)) {
             await resolve()
         }
+        .task {
+            // Pull what the other devices watched when this tab opens.
+            await SyncManager.shared.syncIfStale(seconds: 30)
+        }
+        .refreshable {
+            _ = await SyncManager.shared.syncNow(reason: "pull to refresh")
+        }
     }
 
     private func row(title: String, subtitle: String, fraction: Double) -> some View {
