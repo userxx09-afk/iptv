@@ -1,5 +1,6 @@
 import SwiftUI
 import TapperCore
+import UIKit
 
 /// Distinct enough not to collide with any real category name a provider
 /// might use, and shared by CategoryFilteredList (filtering) and
@@ -85,6 +86,8 @@ struct CategoryFilteredList<RowContent: View>: View {
     @State private var builtFor: Fingerprint?
     @ObservedObject private var favorites = FavoritesStore.shared
     @ObservedObject private var startup = StartupStore.shared
+    /// Bumped to scroll the list back to its first row.
+    @State private var topToken = 0
 
     private func isPinned(_ category: String) -> Bool {
         favorites.isPinnedCategory(namespace: categoryNamespace, category: category)
@@ -185,9 +188,16 @@ struct CategoryFilteredList<RowContent: View>: View {
                 Divider()
             }
             let shown = filtered
-            List(shown, id: \.id) { channel in
-                row(channel, shown)
-            }
+            ScrollViewReader { proxy in
+                List(shown, id: \.id) { channel in
+                    row(channel, shown)
+                }
+                .onChange(of: topToken) { _, _ in
+                    guard let first = shown.first else { return }
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(first.id, anchor: .top)
+                    }
+                }
             // Picking a category can empty the on-screen list if that
             // category's only channel was just removed by a source switch -
             // resetting here keeps a stale filter from hiding everything.
@@ -209,6 +219,7 @@ struct CategoryFilteredList<RowContent: View>: View {
                 if !nowHasFavorites, selectedCategory == favoritesPseudoCategory {
                     selectedCategory = nil
                 }
+            }
             }
         }
         // Grouping a big catalogue by category touches every item once;
@@ -296,6 +307,11 @@ struct CategoryFilteredList<RowContent: View>: View {
 
     private var startingPointMenu: some View {
         Menu {
+            Button {
+                jumpToTop()
+            } label: {
+                Label("Back to top", systemImage: "arrow.up.to.line")
+            }
             Button {
                 startup.setHome(currentHome, for: categoryNamespace)
             } label: {
@@ -389,6 +405,19 @@ struct CategoryFilteredList<RowContent: View>: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        // Press and hold on the bar's empty space jumps back to the top of
+        // the list - the touch version of holding Left on the Fire TV remote.
+        // On a background so the buttons on top keep their own taps.
+        .background(
+            Color.clear
+                .contentShape(Rectangle())
+                .onLongPressGesture(minimumDuration: 0.5) { jumpToTop() }
+        )
+    }
+
+    private func jumpToTop() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        topToken += 1
     }
 }
 
