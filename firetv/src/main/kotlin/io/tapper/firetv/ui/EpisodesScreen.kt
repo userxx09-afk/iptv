@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -18,7 +19,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.nativeKeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -27,6 +36,8 @@ import io.tapper.firetv.ui.theme.Backdrop
 import io.tapper.firetv.ui.theme.Dim
 import io.tapper.firetv.ui.theme.Focus
 import io.tapper.firetv.ui.theme.Ink
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Episode list for one series.
@@ -53,6 +64,34 @@ fun EpisodesScreen(
     var season by remember(episodes) { mutableStateOf<String?>(null) }
     val shown = remember(episodes, season) {
         if (season == null) episodes else episodes.filter { it.group == season }
+    }
+
+    // Holding Left jumps back to the first episode. A held key sends KeyDown
+    // again with repeatCount >= 1 once the repeat delay has passed; the first
+    // of those scrolls to the top and puts focus on that row. A short press is
+    // left alone (nothing lies to the left of this list).
+    val listState = rememberLazyListState()
+    val topFocus = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    val holdLeftToTop = Modifier.onKeyEvent { e ->
+        if (e.key != Key.DirectionLeft) return@onKeyEvent false
+        val repeats = e.nativeKeyEvent.repeatCount
+        if (e.type == KeyEventType.KeyDown && repeats >= 1) {
+            if (repeats == 1) {
+                scope.launch {
+                    runCatching { listState.scrollToItem(0) }
+                    // The first row has to be composed before it can take
+                    // focus, so retry for a few frames.
+                    repeat(5) {
+                        if (runCatching { topFocus.requestFocus() }.isSuccess) return@launch
+                        delay(16)
+                    }
+                }
+            }
+            true
+        } else {
+            false
+        }
     }
 
     Column(
@@ -100,7 +139,11 @@ fun EpisodesScreen(
             )
         }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        LazyColumn(
+            state = listState,
+            modifier = holdLeftToTop,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             // Index folded into the key: a handful of Xtream panels are known
             // to report the same episode id twice across seasons, and a plain
             // `e.id` key crashes this list exactly the way a duplicate guide
@@ -110,6 +153,7 @@ fun EpisodesScreen(
                     episode = ep,
                     watched = ep.id in watchedIds,
                     nextUp = ep.id == nextUpId,
+                    modifier = if (i == 0) Modifier.focusRequester(topFocus) else Modifier,
                 ) { onPlay(shown, i) }
             }
         }
@@ -121,12 +165,13 @@ private fun EpisodeRow(
     episode: Channel,
     watched: Boolean,
     nextUp: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Row(
-        Modifier.fillMaxWidth()
+        modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(if (focused) Focus.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f))
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
