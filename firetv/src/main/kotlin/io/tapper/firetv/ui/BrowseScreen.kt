@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.nativeKeyEvent
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.tapper.core.model.Channel
 import io.tapper.core.model.ContentKind
@@ -723,6 +725,8 @@ fun BrowseScreen(
     }
 
     val firstNavFocus = remember { FocusRequester() }
+    val navListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     // Re-requested whenever the nav re-expands: the collapsed icon strip that
     // had focus is removed from the tree at that moment, and without this
     // the D-pad would have nothing focused and appear dead.
@@ -814,10 +818,67 @@ fun BrowseScreen(
     // was reported as. Swallowing KeyDown too means the framework's own
     // search never sees the key at all, and goBack() is the only thing that
     // acts on it.
+    //
+    // HOLDING Left does something different: it jumps to the top of the
+    // column that has focus instead of stepping out of it. A held key sends
+    // KeyDown again with repeatCount >= 1 once the repeat delay has passed
+    // (about half a second); the first such event does the jump and marks the
+    // press as a hold, so the KeyUp that ends it does not also go back. A
+    // short press is unchanged - it still acts on KeyUp.
+    fun jumpToTop(): Boolean {
+        when (depth) {
+            Depth.CHANNELS -> {
+                channelFocusId = null
+                pendingFocus = Depth.CHANNELS
+            }
+            Depth.CATEGORY -> {
+                // The rows' focus requester follows the selected row, so the
+                // top row is selected first and focus is then sent to it.
+                if (myListActive) {
+                    myListKindFilter = null
+                } else {
+                    historySelected = recentChannels.isNotEmpty()
+                    categoryFilter = null
+                }
+                pendingFocus = Depth.CATEGORY
+            }
+            Depth.COUNTRY -> {
+                countryGroups.firstOrNull()?.let { selectedCountry = it }
+                pendingFocus = Depth.COUNTRY
+            }
+            // The guide panel has no list of its own to jump in: Left there
+            // stays an ordinary step back.
+            else -> return false
+        }
+        return true
+    }
+
+    val leftHeld = remember { BooleanArray(1) }
     val leftArrowGoesBack = Modifier.onKeyEvent { e ->
         if (e.key != Key.DirectionLeft) return@onKeyEvent false
-        if (e.type == KeyEventType.KeyUp) goBack()
+        if (e.type == KeyEventType.KeyDown) {
+            if (e.nativeKeyEvent.repeatCount == 0) {
+                leftHeld[0] = false
+            } else if (!leftHeld[0] && jumpToTop()) {
+                leftHeld[0] = true
+            }
+        } else if (e.type == KeyEventType.KeyUp) {
+            if (leftHeld[0]) leftHeld[0] = false else goBack()
+        }
         true
+    }
+
+    // Holding Left in the NAV column (the leftmost one) jumps to its first
+    // row. A short press is left alone - there is nothing to its left.
+    val navHoldLeftToTop = Modifier.onKeyEvent { e ->
+        if (e.key != Key.DirectionLeft) return@onKeyEvent false
+        if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 1) {
+            scope.launch {
+                runCatching { navListState.scrollToItem(0) }
+                requestFocusRetrying(firstNavFocus)
+            }
+        }
+        e.nativeKeyEvent.repeatCount >= 1
     }
 
     // Mirror image of leftArrowGoesBack, on the NAV column: arrowing RIGHT
@@ -1209,7 +1270,7 @@ fun BrowseScreen(
     ) {
         // NAV
         if (depth == Depth.NAV) {
-            Column(Modifier.width(navWidth).fillMaxHeight().then(rightArrowEntersKind)) {
+            Column(Modifier.width(navWidth).fillMaxHeight().then(rightArrowEntersKind).then(navHoldLeftToTop)) {
                 SourceHeader(activeSource, epgStatus) {
                     menu = {
                         ItemMenu(
@@ -1225,6 +1286,7 @@ fun BrowseScreen(
                 }
                 Spacer(Modifier.height(16.dp))
                 LazyColumn(
+                    state = navListState,
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
