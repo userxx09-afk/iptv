@@ -1,5 +1,6 @@
 import SwiftUI
 import TapperCore
+import UIKit
 
 /// Episode lists already fetched this run, so reopening a show is instant.
 /// Keyed by the active source as well as the show: Xtream ids repeat between
@@ -51,15 +52,25 @@ struct EpisodeListView: View {
     /// `.fullScreenCover`, not a shared one, since EpisodeListView is pushed
     /// on top of ContentView's NavigationStack rather than living inside it.
     @State private var playingEpisode: Channel?
+    /// Bumped to scroll back to the top of the page.
+    @State private var topToken = 0
+    private static let topId = "episodes-top"
+
+    private func jumpToTop() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        topToken += 1
+    }
 
     var body: some View {
+        ScrollViewReader { proxy in
         List {
             // Poster, synopsis and rating from TMDb above the episodes.
             Section {
                 TitleInfoBlock(name: seriesItem.name, isShow: true)
+                    .id(Self.topId)
             }
 
-            Section("Episodes") {
+            Section {
                 if isLoading {
                     // Grey placeholder rows rather than a spinner, so the
                     // list does not flash when the real rows arrive.
@@ -110,9 +121,31 @@ struct EpisodeListView: View {
                         }
                     }
                 }
+            } header: {
+                // Press and hold the heading to jump back to the top - the
+                // touch version of holding Left on the Fire TV remote.
+                Text("Episodes")
+                    .contentShape(Rectangle())
+                    .onLongPressGesture(minimumDuration: 0.5) { jumpToTop() }
             }
         }
+        .onChange(of: topToken) { _, _ in
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(Self.topId, anchor: .top)
+            }
+        }
+        }
         .navigationTitle(seriesItem.name)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    jumpToTop()
+                } label: {
+                    Image(systemName: "arrow.up.to.line")
+                }
+                .accessibilityLabel("Back to top")
+            }
+        }
         .onAppear {
             guard isLoading, !requested else { return }
             requested = true
