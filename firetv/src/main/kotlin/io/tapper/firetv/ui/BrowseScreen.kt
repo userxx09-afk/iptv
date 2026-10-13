@@ -152,6 +152,16 @@ internal val MiniPlayerGap = 12.dp
  */
 private val PREFERRED_COUNTRIES = listOf("us", "gb", "ca", "au")
 
+/**
+ * True when this event ends (KeyUp) a press that lasted long enough to count
+ * as a hold. Held-key repeats (KeyDown with repeatCount >= 1) are the quick
+ * way to notice a hold, but not every remote or Fire TV build sends them, so
+ * how long the button was down is checked on release as well.
+ */
+internal fun endsLongPress(e: androidx.compose.ui.input.key.KeyEvent): Boolean =
+    e.type == KeyEventType.KeyUp &&
+        e.nativeKeyEvent.eventTime - e.nativeKeyEvent.downTime >= 450L
+
 /** Sentinel key for the synthetic "Recently Watched" rail prepended to the
  *  country list - deliberately not a valid country token (see CategoryName's
  *  TOKENS map) so it can never collide with a real one. */
@@ -862,7 +872,13 @@ fun BrowseScreen(
                 leftHeld[0] = true
             }
         } else if (e.type == KeyEventType.KeyUp) {
-            if (leftHeld[0]) leftHeld[0] = false else goBack()
+            if (leftHeld[0]) {
+                leftHeld[0] = false
+            } else if (endsLongPress(e) && jumpToTop()) {
+                // Held, but no repeat events arrived - jump on release.
+            } else {
+                goBack()
+            }
         }
         true
     }
@@ -871,13 +887,15 @@ fun BrowseScreen(
     // row. A short press is left alone - there is nothing to its left.
     val navHoldLeftToTop = Modifier.onKeyEvent { e ->
         if (e.key != Key.DirectionLeft) return@onKeyEvent false
-        if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 1) {
+        val toTop = (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 1) ||
+            endsLongPress(e)
+        if (toTop) {
             scope.launch {
                 runCatching { navListState.scrollToItem(0) }
                 requestFocusRetrying(firstNavFocus)
             }
         }
-        e.nativeKeyEvent.repeatCount >= 1
+        e.nativeKeyEvent.repeatCount >= 1 || toTop
     }
 
     // Mirror image of leftArrowGoesBack, on the NAV column: arrowing RIGHT

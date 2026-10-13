@@ -75,22 +75,21 @@ fun EpisodesScreen(
     val holdLeftToTop = Modifier.onKeyEvent { e ->
         if (e.key != Key.DirectionLeft) return@onKeyEvent false
         val repeats = e.nativeKeyEvent.repeatCount
-        if (e.type == KeyEventType.KeyDown && repeats >= 1) {
-            if (repeats == 1) {
-                scope.launch {
-                    runCatching { listState.scrollToItem(0) }
-                    // The first row has to be composed before it can take
-                    // focus, so retry for a few frames.
-                    repeat(5) {
-                        if (runCatching { topFocus.requestFocus() }.isSuccess) return@launch
-                        delay(16)
-                    }
+        // Either a held-key repeat, or - for remotes that send none - a
+        // release after the button had been down for a while.
+        val toTop = (e.type == KeyEventType.KeyDown && repeats == 1) || endsLongPress(e)
+        if (toTop) {
+            scope.launch {
+                runCatching { listState.scrollToItem(0) }
+                // The first row has to be composed before it can take
+                // focus, so retry for a few frames.
+                repeat(5) {
+                    if (runCatching { topFocus.requestFocus() }.isSuccess) return@launch
+                    delay(16)
                 }
             }
-            true
-        } else {
-            false
         }
+        repeats >= 1 || toTop
     }
 
     Column(
