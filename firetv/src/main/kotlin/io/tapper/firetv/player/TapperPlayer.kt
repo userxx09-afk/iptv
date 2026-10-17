@@ -2,6 +2,7 @@ package io.tapper.firetv.player
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.SystemClock
 import androidx.annotation.OptIn
@@ -85,6 +86,19 @@ class TapperPlayer(
     private var monitorJob: Job? = null
     private var stallRestarts = 0
 
+    // Connection awareness. A Wi-Fi drop-out, a router restart or a switch
+    // between Wi-Fi and Ethernet leaves the open stream connection dead; the
+    // callback below notices the connection coming back and reopens the
+    // stream straight away instead of waiting for the stall timer, and time
+    // spent offline no longer counts against the reconnect allowance.
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var lastNetwork: Network? = null
+    private var networkLost = false
+    private var networkJob: Job? = null
+    /** The failure screen is showing (set by explain, cleared on a new start). */
+    private var failed = false
+    private var offlineSinceMs = 0L
+
     companion object {
         /** Frozen / buffering this long after picture has started => reconnect. */
         private const val STALL_AFTER_PLAY_MS = 10_000L
@@ -94,6 +108,11 @@ class TapperPlayer(
         private const val MAX_STALL_RESTARTS = 3
         /** Playing smoothly this long forgives earlier reconnects. */
         private const val HEALTHY_RESET_MS = 30_000L
+        /** Offline this long while playing => say so instead of spinning. */
+        private const val OFFLINE_NOTICE_MS = 20_000L
+        /** Pause after the connection returns, so it has settled (and the
+         *  provider has noticed the old connection closed) before reopening. */
+        private const val RECONNECT_DELAY_MS = 1_200L
     }
 
     fun attach(playerView: PlayerView) {
@@ -131,6 +150,8 @@ class TapperPlayer(
         attempt = 0
         stallRestarts = 0
         pendingResumeMs = resumeMs
+        networkJob?.cancel()
+        registerNetworkCallback()
 
         val first = channel.streams.first()
         // Fail fast and honestly rather than loading something ExoPlayer will
@@ -144,6 +165,8 @@ class TapperPlayer(
 
     private fun startStream(channel: Channel, stream: StreamRef) {
         renderedFrames = false
+        failed = false
+        offlineSinceMs = 0L
         startedAtMs = System.currentTimeMillis()
         probe = null
         other = null
@@ -212,11 +235,26 @@ class TapperPlayer(
                 lastPos = pos
                 if (moving) {
                     lastMove = now
+                    offlineSinceMs = 0L
                     if (movingSince == 0L) movingSince = now
                     if (now - movingSince > HEALTHY_RESET_MS) stallRestarts = 0
                     continue
                 }
                 movingSince = 0L
+                // The failure screen is already up; the network callback
+                // (or the viewer) starts the next attempt.
+                if (failed) { lastMove = now; continue }
+                // No connection: nothing a reconnect could fix, and the
+                // time must not use up the allowance. After a while, say so.
+                if (!isOnline()) {
+                    lastMove = now
+                    if (offlineSinceMs == 0L) offlineSinceMs = now
+                    if (now - offlineSinceMs > OFFLINE_NOTICE_MS) {
+                        explain(channel, null)
+                    }
+                    continue
+                }
+                offlineSinceMs = 0L
                 // A live feed that reports "ended" has been cut off.
                 val dead = state == Player.STATE_ENDED && live
                 if (state == Player.STATE_ENDED && !live) continue   // finished normally
@@ -252,6 +290,54 @@ class TapperPlayer(
         explain(channel, null)
     }
 
+    /** Watches the default network. Registered once per playback session and
+     *  removed in [release]. Callbacks arrive on a connectivity thread, so
+     *  the work is handed to [scope]. */
+    private fun registerNetworkCallback() {
+        if (networkCallback != null) return
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                scope.launch {
+                    val previous = lastNetwork
+                    lastNetwork = network
+                    // The first report just says where things stand.
+                    if (previous == null) { networkLost = false; return@launch }
+                    val changed = previous != network || networkLost
+                    networkLost = false
+                    if (changed) onNetworkBack()
+                }
+            }
+
+            override fun onLost(network: Network) {
+                scope.launch { if (network == lastNetwork) networkLost = true }
+            }
+        }
+        val registered = runCatching { cm.registerDefaultNetworkCallback(callback) }.isSuccess
+        if (registered) networkCallback = callback
+    }
+
+    /** The connection came back, or moved to a different network. */
+    private fun onNetworkBack() {
+        val channel = current ?: return
+        val p = player
+        stallRestarts = 0
+        // Still playing from what was buffered: leave it. If the old
+        // connection is dead it runs dry shortly and the stall timer
+        // reconnects it; restarting a healthy picture only adds a blip.
+        if (p != null && !failed && p.isPlaying && p.playbackState == Player.STATE_READY) return
+
+        networkJob?.cancel()
+        networkJob = scope.launch {
+            delay(RECONNECT_DELAY_MS)
+            val stream = channel.streams.getOrNull(attempt) ?: return@launch
+            android.util.Log.w("TapperPlayer", "network back - reconnecting")
+            if (durationMs() > 0) pendingResumeMs = positionMs()   // on-demand: keep our place
+            player?.release(); player = null
+            startStream(channel, stream)
+        }
+    }
+
     private val listener = object : Player.Listener {
 
         override fun onRenderedFirstFrame() {
@@ -266,6 +352,14 @@ class TapperPlayer(
             // live edge on the same connection - no failure, no restart.
             if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
                 player?.let { it.seekToDefaultPosition(); it.prepare() }
+                return
+            }
+
+            // No connection: show it (it clears itself when the picture comes
+            // back) and let the network callback reopen the stream, rather
+            // than spending the reconnect allowance on a dead link.
+            if (!isOnline()) {
+                explain(channel, error)
                 return
             }
 
@@ -300,6 +394,7 @@ class TapperPlayer(
     /** [error] is null when the stream never raised one but stalled for good
      *  - treated as a connection problem for the diagnosis. */
     private fun explain(channel: Channel, error: PlaybackException?) {
+        failed = true
         val status = (error?.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
         val socket = error == null || error.errorCode in setOf(
             PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
@@ -336,6 +431,16 @@ class TapperPlayer(
 
     fun release() {
         monitorJob?.cancel()
+        networkJob?.cancel()
+        networkCallback?.let { cb ->
+            runCatching {
+                (context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)
+                    ?.unregisterNetworkCallback(cb)
+            }
+        }
+        networkCallback = null
+        lastNetwork = null
+        networkLost = false
         probeJob?.cancel()
         view?.player = null
         player?.release()
