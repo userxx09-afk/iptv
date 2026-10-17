@@ -37,7 +37,11 @@ final class XtreamLoader: ObservableObject {
     /// instead of overwriting the newer source's catalogue.
     private var generation = 0
 
-    func login(host rawHost: String, username rawUsername: String, password rawPassword: String) {
+    /// Signs in and loads the library. Uses the copy saved on this iPad when
+    /// there is a recent one (see CatalogueCache), so opening the app doesn't
+    /// download and parse everything again; [forceRefresh] skips that.
+    func login(host rawHost: String, username rawUsername: String, password rawPassword: String,
+               forceRefresh: Bool = false) {
         let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let username = rawUsername.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty, !username.isEmpty, !rawPassword.isEmpty else {
@@ -53,6 +57,74 @@ final class XtreamLoader: ObservableObject {
         isLoading = true
         generation += 1
         let myGeneration = generation
+
+        if forceRefresh {
+            fetchFromServer(host: host, username: username, password: rawPassword,
+                            generation: myGeneration, fallback: nil)
+            return
+        }
+
+        // Reading the saved copy is a disk read and a lot of small parses,
+        // so it happens off the main thread.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let started = Date()
+            let saved = CatalogueCache.load(host: host, username: username)
+            await MainActor.run {
+                guard let self, self.generation == myGeneration else { return }
+                if let saved, saved.isFresh {
+                    let secs = String(format: "%.1f", Date().timeIntervalSince(started))
+                    AppLog.shared.log("LOAD", "Xtream library read from this iPad in \(secs)s: live \(saved.live.count), movies \(saved.movies.count), shows \(saved.series.count) - \(AppLog.memoryDescription())")
+                    self.isLoading = false
+                    self.show(saved)
+                    self.refreshAccount(host: host, username: username, password: rawPassword, generation: myGeneration)
+                } else {
+                    self.fetchFromServer(host: host, username: username, password: rawPassword,
+                                         generation: myGeneration, fallback: saved)
+                }
+            }
+        }
+    }
+
+    private func show(_ saved: CachedCatalogue) {
+        account = saved.account
+        liveChannels = saved.live
+        movies = saved.movies
+        series = saved.series
+    }
+
+    /// With the library already on screen from the saved copy, checks the
+    /// login in the background and brings the account details up to date.
+    /// A failure here is only logged: the saved library is still good, and
+    /// playback will say so if the account really has lapsed.
+    private func refreshAccount(host: String, username: String, password: String, generation myGeneration: Int) {
+        XtreamBridge.shared.authenticate(
+            host: host, username: username, password: password,
+            onResult: { [weak self] account, error in
+                if let error {
+                    AppLog.shared.log("LOAD", "Account check failed (saved library kept): \(error)")
+                    // A refused login is worth saying, since playback won't
+                    // work; a network error is not.
+                    if error.lowercased().contains("rejected") {
+                        DispatchQueue.main.async {
+                            guard let self, self.generation == myGeneration else { return }
+                            self.warnings.append("The server rejected the saved login. Check the username and password in Settings.")
+                        }
+                    }
+                    return
+                }
+                guard let account else { return }
+                DispatchQueue.main.async {
+                    guard let self, self.generation == myGeneration else { return }
+                    self.account = account
+                }
+            }
+        )
+    }
+
+    /// Downloads the whole library. [fallback] is an out-of-date saved copy,
+    /// used if the server can't be reached.
+    private func fetchFromServer(host: String, username: String, password: String,
+                                 generation myGeneration: Int, fallback: CachedCatalogue?) {
         let startedAt = Date()
         let log = AppLog.shared
         log.log("LOAD", "Xtream login + catalogue fetch starting (host \(host))")
@@ -64,7 +136,7 @@ final class XtreamLoader: ObservableObject {
         XtreamBridge.shared.loginAndLoad(
             host: host,
             username: username,
-            password: rawPassword,
+            password: password,
             sourceId: "xtream-default",
             onWarning: { [weak self] message in
                 AppLog.shared.log("WARN", message)
@@ -85,7 +157,15 @@ final class XtreamLoader: ObservableObject {
                     guard let self, self.generation == myGeneration else { return }
                     self.isLoading = false
                     if let error {
-                        self.errorMessage = error
+                        // The server can't be reached (or refused): an older
+                        // saved copy is better than an empty screen.
+                        if let fallback {
+                            self.show(fallback)
+                            self.warnings.append("Couldn't reach the server, so this is the library saved on this iPad.")
+                            log.log("LOAD", "Showing the saved library instead")
+                        } else {
+                            self.errorMessage = error
+                        }
                         return
                     }
                     guard let result else { return }
@@ -94,6 +174,19 @@ final class XtreamLoader: ObservableObject {
                     self.movies = result.movies
                     self.series = result.series
                     log.log("LOAD", "Xtream catalogue handed to the UI - \(AppLog.memoryDescription())")
+
+                    // Keep a copy for next time - but only a complete one: a
+                    // load where movies or shows failed would otherwise be
+                    // remembered as if that were everything.
+                    if self.warnings.isEmpty, !result.live.isEmpty {
+                        let account = result.account
+                        let live = result.live, movies = result.movies, series = result.series
+                        Task.detached(priority: .utility) {
+                            CatalogueCache.save(host: host, username: username, account: account,
+                                                live: live, movies: movies, series: series)
+                            AppLog.shared.log("LOAD", "Library saved on this iPad")
+                        }
+                    }
                 }
             }
         )

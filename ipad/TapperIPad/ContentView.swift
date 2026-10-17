@@ -173,7 +173,7 @@ struct ContentView: View {
                         addSourceBusy = true
                         pendingSourceSave = .xtream(name: name, host: host, user: user, pass: pass)
                         beginLoadBreadcrumb(id: "new-source", name: name.isEmpty ? host : name)
-                        xtreamLoader.login(host: host, username: user, password: pass)
+                        xtreamLoader.login(host: host, username: user, password: pass, forceRefresh: true)
                         if !xtreamLoader.isLoading { failPendingSave(xtreamLoader.errorMessage) }
                     },
                     onSubmitM3u: { name, url, epg in

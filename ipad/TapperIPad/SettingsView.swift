@@ -157,6 +157,21 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Button("Refresh channel list") {
+                        // Forget the saved copy, then load the source again
+                        // from the server.
+                        CatalogueCache.clearAll()
+                        if let current = sources.first(where: { $0.id == activeId }) {
+                            onSelect(current)
+                        }
+                    }
+                } header: {
+                    Text("Library")
+                } footer: {
+                    Text("Your channels, movies and shows are saved on this iPad for a day, so the app opens quickly even with a poor connection. Refresh to download them again now, for example after your provider adds something.")
+                }
+
+                Section {
                     NavigationLink {
                         RemindersView()
                     } label: {
