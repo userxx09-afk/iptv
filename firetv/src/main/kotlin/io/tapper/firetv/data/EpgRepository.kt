@@ -34,7 +34,10 @@ class EpgRepository(
 ) {
 
     companion object {
-        private const val STALE_AFTER_MS = 6 * 60 * 60 * 1000L
+        /** The guide holds three days ahead, so half a day old is still
+         *  complete; refreshing it every 6 hours cost a 100MB download and a
+         *  full parse for no visible difference. */
+        private const val STALE_AFTER_MS = 12 * 60 * 60 * 1000L
         /** Keep a little history and three days ahead; the rest is dead weight. */
         private const val KEEP_BEFORE_MS = 6 * 60 * 60 * 1000L
         private const val KEEP_AFTER_MS = 72 * 60 * 60 * 1000L
@@ -72,10 +75,28 @@ class EpgRepository(
     ): kotlin.Result<Result> =
         withContext(Dispatchers.IO) {
             // Background priority: the import is long and must never out-compete
-            // playback or the UI for CPU on a low-powered stick.
+            // playback or the UI for CPU on a low-powered stick. Put back
+            // afterwards - this thread belongs to a shared pool, and leaving it
+            // at background priority slowed every later job that landed on it
+            // (movie info lookups, the "on now" query).
+            val previous = runCatching {
+                android.os.Process.getThreadPriority(android.os.Process.myTid())
+            }.getOrDefault(android.os.Process.THREAD_PRIORITY_DEFAULT)
             runCatching {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             }
+            try {
+                refreshNow(source, declared, progress)
+            } finally {
+                runCatching { android.os.Process.setThreadPriority(previous) }
+            }
+        }
+
+    private fun refreshNow(
+        source: TvSource,
+        declared: List<String>,
+        progress: Progress,
+    ): kotlin.Result<Result> {
             val urls = guideUrls(source, declared)
             val primaryResult: kotlin.Result<Result> = if (urls.isEmpty()) {
                 kotlin.Result.failure(
@@ -124,8 +145,8 @@ class EpgRepository(
             // under ids nothing else writes to.
             runCatching { mergeSupplemental(source.id) }
 
-            primaryResult
-        }
+            return primaryResult
+    }
 
     /**
      * Fetches every configured supplemental guide and writes in only the
