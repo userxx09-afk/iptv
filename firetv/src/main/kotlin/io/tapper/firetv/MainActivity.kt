@@ -44,11 +44,17 @@ import io.tapper.firetv.ui.PlayerScreen
 import io.tapper.firetv.ui.SearchScreen
 import io.tapper.firetv.ui.theme.TapperTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
+
+    private companion object {
+        /** How long playback may continue after the app leaves the screen. */
+        const val BACKGROUND_PLAYBACK_GRACE_MS = 30_000L
+    }
 
     private sealed interface Screen {
         data object Loading : Screen
@@ -81,21 +87,30 @@ class MainActivity : ComponentActivity() {
     private var foregroundTick by mutableIntStateOf(0)
     private var startedOnce = false
 
+    /** True while the app is off screen (Home pressed, screensaver, another
+     *  app on top). Playback must not carry on decoding video nobody sees. */
+    private var inBackground by mutableStateOf(false)
+
     override fun onStart() {
         super.onStart()
+        inBackground = false
         if (startedOnce) foregroundTick++
         startedOnce = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        inBackground = true
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as TapperApp
-        // A big account can sit on the loading screen for a while even with
-        // background sync - the Fire TV screensaver kicking in mid-load (or
-        // mid-browse) looked like the app had frozen. Keeping the screen on
-        // for the life of the activity matches what a video app is expected
-        // to do anyway.
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // The screen is kept on only while something is loading or playing
+        // (see keepAwake in setContent below). Holding it on for the whole
+        // life of the activity meant the stick never dimmed or reached its
+        // screensaver while the app sat open, and kept the TV pulling a
+        // picture, and the processor busy, for as long as the app was left.
 
         setContent {
             // A real stack, so Back always goes up one level from any screen
@@ -418,6 +433,26 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(active.id) { loadActive() }
+
+            // Screen stays on while loading a big account (the screensaver
+            // mid-load looked like a freeze) and while something plays; the
+            // rest of the time the stick is free to dim and sleep.
+            val keepAwake = playing != null || screen is Screen.Loading || loadStatus != null
+            LaunchedEffect(keepAwake) {
+                if (keepAwake) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+
+            // Sent to the background while playing (Home, the screensaver, a
+            // call-to-action from another app): the picture is no longer
+            // shown, but the player would keep downloading and decoding it
+            // indefinitely. A short grace covers a quick glance away.
+            LaunchedEffect(inBackground, playing != null) {
+                if (inBackground && playing != null) {
+                    delay(BACKGROUND_PLAYBACK_GRACE_MS)
+                    if (inBackground && playing != null) stopPlayback()
+                }
+            }
 
             // Reads the granted folder's contents once per source/folder
             // change - a real SAF directory listing, so kept off the main
