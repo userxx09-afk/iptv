@@ -4,6 +4,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -11,10 +13,19 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import io.tapper.core.model.Channel
@@ -54,6 +65,10 @@ class MainActivity : ComponentActivity() {
     private companion object {
         /** How long playback may continue after the app leaves the screen. */
         const val BACKGROUND_PLAYBACK_GRACE_MS = 30_000L
+        /** No remote press for this long while playing => ask "Still watching?" */
+        const val IDLE_PROMPT_AFTER_MS = 3L * 60L * 60L * 1000L
+        /** How long the question waits for a press before playback stops. */
+        const val IDLE_PROMPT_GRACE_MS = 2L * 60L * 1000L
     }
 
     private sealed interface Screen {
@@ -90,6 +105,21 @@ class MainActivity : ComponentActivity() {
     /** True while the app is off screen (Home pressed, screensaver, another
      *  app on top). Playback must not carry on decoding video nobody sees. */
     private var inBackground by mutableStateOf(false)
+
+    /** When the remote was last pressed, and whether "Still watching?" is up. */
+    private var lastInputMs = SystemClock.elapsedRealtime()
+    private var stillWatchingPrompt by mutableStateOf(false)
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        lastInputMs = SystemClock.elapsedRealtime()
+        if (stillWatchingPrompt) {
+            // The press that answers the question does only that, so it
+            // can't also change channel or skip.
+            if (event.action == KeyEvent.ACTION_DOWN) stillWatchingPrompt = false
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
 
     override fun onStart() {
         super.onStart()
@@ -447,6 +477,31 @@ class MainActivity : ComponentActivity() {
             // call-to-action from another app): the picture is no longer
             // shown, but the player would keep downloading and decoding it
             // indefinitely. A short grace covers a quick glance away.
+            // Hours of playback with no remote press usually means the TV was
+            // switched off (the stick can't tell) and the stream is being
+            // downloaded and decoded for nobody. After a long stretch it asks
+            // "Still watching?" and stops if nobody answers.
+            LaunchedEffect(playing != null) {
+                if (playing == null) { stillWatchingPrompt = false; return@LaunchedEffect }
+                lastInputMs = SystemClock.elapsedRealtime()
+                var askedAt = 0L
+                while (true) {
+                    delay(15_000)
+                    val now = SystemClock.elapsedRealtime()
+                    if (!stillWatchingPrompt) {
+                        if (now - lastInputMs >= IDLE_PROMPT_AFTER_MS) {
+                            stillWatchingPrompt = true
+                            askedAt = now
+                        }
+                    } else if (now - askedAt >= IDLE_PROMPT_GRACE_MS) {
+                        stillWatchingPrompt = false
+                        stopPlayback()
+                        Toast.makeText(this@MainActivity, "Playback stopped - no one was watching", Toast.LENGTH_LONG).show()
+                        return@LaunchedEffect
+                    }
+                }
+            }
+
             LaunchedEffect(inBackground, playing != null) {
                 if (inBackground && playing != null) {
                     delay(BACKGROUND_PLAYBACK_GRACE_MS)
@@ -1077,6 +1132,26 @@ class MainActivity : ComponentActivity() {
                         onExit = { stopPlayback() },
                         bufferSize = bufferSize,
                     )
+                    }
+                }
+                if (stillWatchingPrompt && p != null) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(Color(0xCC000000)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "Still watching?",
+                                style = MaterialTheme.typography.displaySmall,
+                                color = Color.White,
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                "Press any button to keep playing. Playback stops in a couple of minutes otherwise.",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.White,
+                            )
+                        }
                     }
                 }
                 }
