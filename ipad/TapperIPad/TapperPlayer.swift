@@ -107,6 +107,7 @@ final class TapperPlayer: ObservableObject {
             return
         }
         currentChannel = channel
+        configureAudioSession()
         startWatchingNetwork()
         startMonitor()
         startStream(channel: channel, stream: first, resumeAt: nil)
@@ -169,6 +170,7 @@ final class TapperPlayer: ObservableObject {
         tearDownObservers()
 
         let avPlayer = player ?? AVPlayer()
+        avPlayer.isMuted = false
         avPlayer.replaceCurrentItem(with: item)
         if player == nil { player = avPlayer }
 
@@ -187,6 +189,7 @@ final class TapperPlayer: ObservableObject {
                 case .readyToPlay:
                     self.isBuffering = false
                     self.renderedFrames = true
+                    self.logAudio(for: observedItem)
                     // A later stall in this same playback session gets its
                     // own fresh retry budget rather than inheriting however
                     // many of these were already spent getting here.
@@ -222,6 +225,37 @@ final class TapperPlayer: ObservableObject {
         }
 
         avPlayer.play()
+    }
+
+    // MARK: - Audio
+
+    /// Plays as a video app: sound comes out whatever the silent / mute
+    /// setting says, and the session is reclaimed after a call or another
+    /// app's audio ends. Without a category set, iOS uses its default, which
+    /// follows the mute switch and can leave a stream silent.
+    private func configureAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .moviePlayback)
+            try session.setActive(true)
+        } catch {
+            AppLog.shared.log("AUDIO", "Couldn't set up audio: \(error.localizedDescription)")
+        }
+    }
+
+    /// One line per stream start in Settings > Logs, so a silent stream can be
+    /// told apart: no audio track in the stream, muted, volume down, or sound
+    /// going somewhere else.
+    private func logAudio(for item: AVPlayerItem) {
+        let session = AVAudioSession.sharedInstance()
+        let audioTracks = item.tracks.filter { $0.assetTrack?.mediaType == .audio }.count
+        let outputs = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        let muted = player?.isMuted ?? false
+        let volume = player?.volume ?? 0
+        AppLog.shared.log(
+            "AUDIO",
+            "ready: audio tracks \(audioTracks), player muted \(muted), player volume \(volume), device volume \(session.outputVolume), category \(session.category.rawValue), output \(outputs)"
+        )
     }
 
     // MARK: - Connection awareness
