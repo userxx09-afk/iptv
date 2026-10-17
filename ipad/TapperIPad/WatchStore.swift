@@ -68,6 +68,9 @@ final class WatchStore: ObservableObject {
     private var entries: [String: WatchEntry] = [:]
     private let url: URL
     private var saveWork: DispatchWorkItem?
+    private var savePending = false
+    /// Encoding and writing happen here, not on the main thread.
+    private static let writeQueue = DispatchQueue(label: "io.tapper.watchstore", qos: .utility)
     private let maxEntries = 500
     private let deviceId = SyncDevice.id
     private var highClock: Int64 = 0
@@ -160,7 +163,10 @@ final class WatchStore: ObservableObject {
             entry.positionSec = position
         }
         entries[k] = entry
-        scheduleSave()
+        // Progress ticks arrive every few seconds during a film; saving the
+        // whole history that often is pointless. The final call (player
+        // closing) and going to the background save straight away.
+        scheduleSave(after: publish ? 2 : 20)
         if publish { revision += 1 }
     }
 
@@ -219,7 +225,8 @@ final class WatchStore: ObservableObject {
     /// Writes pending changes now - for when the app goes to the background.
     func flush() {
         saveWork?.cancel()
-        save()
+        // Synchronous: the app may be suspended moments after this returns.
+        save(synchronously: true)
     }
 
     // MARK: - Sync with other devices
@@ -353,23 +360,32 @@ final class WatchStore: ObservableObject {
         return true
     }
 
-    private func scheduleSave() {
+    private func scheduleSave(after delay: TimeInterval = 2) {
+        // One pending slow save is enough; restarting its timer on every
+        // tick would mean it never fires.
+        if savePending && delay > 2 { return }
+        savePending = true
         saveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.save() }
         saveWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    private func save() {
+    private func save(synchronously: Bool = false) {
+        savePending = false
         var all = Array(entries.values)
         if all.count > maxEntries {
             all.sort { $0.updated > $1.updated }
             all = Array(all.prefix(maxEntries))
             entries = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
         }
-        if let data = try? JSONEncoder().encode(all) {
-            try? data.write(to: url, options: .atomic)
+        let target = url
+        let write = {
+            if let data = try? JSONEncoder().encode(all) {
+                try? data.write(to: target, options: .atomic)
+            }
         }
+        if synchronously { write() } else { Self.writeQueue.async(execute: write) }
     }
 }
 
@@ -401,6 +417,11 @@ final class WatchRecorder: ObservableObject {
 
     private func tick(final: Bool) {
         guard armed, let player, let channel else { return }
+        // While the picture is rebuffering or reconnecting (a network drop
+        // restarts the stream), the clock can read near zero - recording
+        // that would overwrite the real place.
+        if !final, player.timeControlStatus == .waitingToPlayAtSpecifiedRate { return }
+        guard player.currentItem?.status == .readyToPlay else { return }
         let position = player.currentTime().seconds
         let rawDuration = player.currentItem?.duration.seconds ?? 0
         guard position.isFinite, position >= 0 else { return }

@@ -93,9 +93,20 @@ struct PlayerView: View {
             }
 
             if controller.isBuffering && controller.diagnosisMessage == nil {
-                ProgressView()
-                    .tint(.white)
-                    .scaleEffect(1.4)
+                VStack(spacing: 14) {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(1.4)
+                    if let note = controller.statusNote {
+                        Text(note)
+                            .font(.footnote)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.black.opacity(0.55))
+                            .clipShape(Capsule())
+                    }
+                }
             }
 
             if let message = controller.diagnosisMessage {
@@ -155,12 +166,14 @@ struct PlayerView: View {
             controller.play(current)
             scheduleHide()
             startWatchTracking()
+            EpgManager.shared.playbackChanged(active: true)
         }
         .onDisappear {
             hideTask?.cancel()
             recorder.stop()
             if !isLive { SyncManager.shared.syncSoon(reason: "player closed") }
             controller.release()
+            EpgManager.shared.playbackChanged(active: false)
         }
         .onChange(of: controller.isBuffering) { _, buffering in
             guard !buffering, let target = resumeAt, let player = controller.player else { return }

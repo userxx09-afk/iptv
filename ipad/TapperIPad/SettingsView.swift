@@ -13,6 +13,7 @@ struct SettingsView: View {
     let onDismiss: () -> Void
 
     @State private var buffer = PlayerSettingsStore.shared.bufferSize
+    @State private var mobileQuality = PlayerSettingsStore.shared.mobileQuality
     @State private var tmdbKey = MovieMetadataStore.shared.apiKey
     @State private var infoCleared = false
     @State private var confirmClearWatch = false
@@ -199,10 +200,18 @@ struct SettingsView: View {
                     .onChange(of: buffer) { _, newValue in
                         PlayerSettingsStore.shared.bufferSize = newValue
                     }
+                    Picker("Mobile data", selection: $mobileQuality) {
+                        ForEach(MobileQuality.allCases) { option in
+                            Text(option.label).tag(option)
+                        }
+                    }
+                    .onChange(of: mobileQuality) { _, newValue in
+                        PlayerSettingsStore.shared.mobileQuality = newValue
+                    }
                 } header: {
                     Text("Playback")
                 } footer: {
-                    Text(buffer.description + " Takes effect the next time something is played.")
+                    Text(buffer.description + " " + mobileQuality.description + " Takes effect the next time something is played. On mobile data the app always keeps at least 20 seconds of cushion, and reconnects by itself when you move between networks.")
                 }
 
                 Section {

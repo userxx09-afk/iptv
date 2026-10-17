@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Buffer depth for playback, configurable from the toolbar's Buffering
@@ -53,6 +54,46 @@ enum BufferSize: String, CaseIterable, Identifiable {
     }
 }
 
+/// How hard to hold the picture quality down while on mobile data, a hotspot
+/// or in Low Data Mode - the situations where a stream is most likely to
+/// stall. Only matters for streams that offer more than one quality (most
+/// HLS channels do); a single-quality stream is unaffected. Wi-Fi and wired
+/// connections are never limited.
+enum MobileQuality: String, CaseIterable, Identifiable {
+    case auto, saver, full
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .auto: return "Automatic (default)"
+        case .saver: return "Data saver"
+        case .full: return "Full quality"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .auto: return "On mobile data, cap the picture at a level that holds up while moving."
+        case .saver: return "On mobile data, use a low quality (720p or less). Best for weak signal or a data limit."
+        case .full: return "Never limit quality. Can stall on a weak mobile connection."
+        }
+    }
+
+    /// Peak bits per second AVPlayer is asked to stay under; 0 means no cap.
+    var peakBitRate: Double {
+        switch self {
+        case .auto: return 4_000_000
+        case .saver: return 1_500_000
+        case .full: return 0
+        }
+    }
+
+    var maxResolution: CGSize? {
+        self == .saver ? CGSize(width: 1280, height: 720) : nil
+    }
+}
+
 /// Plain UserDefaults, same shape as Fire TV's PlayerSettingsStore
 /// (SharedPreferences-backed). Read once per stream start (TapperPlayer.swift),
 /// so a value changed mid-playback takes effect the next time something is
@@ -68,5 +109,10 @@ final class PlayerSettingsStore {
     var bufferSize: BufferSize {
         get { BufferSize(rawValue: defaults.string(forKey: key) ?? "") ?? .medium }
         set { defaults.set(newValue.rawValue, forKey: key) }
+    }
+
+    var mobileQuality: MobileQuality {
+        get { MobileQuality(rawValue: defaults.string(forKey: "tapper.player.mobileQuality") ?? "") ?? .auto }
+        set { defaults.set(newValue.rawValue, forKey: "tapper.player.mobileQuality") }
     }
 }

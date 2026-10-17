@@ -18,12 +18,22 @@ import AVFoundation
 ///     otherwise. Diagnose.from already treats httpStatus as optional for
 ///     exactly this reason, so this degrades to a slightly vaguer message
 ///     rather than a wrong one.
+///
+/// Built for use on the move: it watches the connection (NetworkMonitor), keeps
+/// a bigger cushion and a quality cap while on mobile data, reconnects on its
+/// own when a stream freezes or the iPad hands over between Wi-Fi and cellular,
+/// and tells the viewer what it is doing instead of showing a bare spinner.
 @MainActor
 final class TapperPlayer: ObservableObject {
     @Published private(set) var player: AVPlayer?
     @Published var diagnosisMessage: String?
     @Published private(set) var isBuffering = true
+    /// A short line for the viewer while playback is struggling or
+    /// reconnecting ("Waiting for network...", "Reconnecting..."). Nil when
+    /// everything is fine.
+    @Published private(set) var statusNote: String?
 
+    private var currentChannel: Channel?
     private var attempt = 0
     private var startedAt = Date()
     private var renderedFrames = false
@@ -35,13 +45,54 @@ final class TapperPlayer: ObservableObject {
     private var transientRetries = 0
     private let maxTransientRetries = 2
 
+    /// Same-feed restarts after the picture froze (reset once playback has
+    /// been healthy for a while).
+    private var stallRestarts = 0
+    private let maxStallRestarts = 3
+    /// Retries after a failure that came right after the connection changed.
+    private var networkRetries = 0
+    private let maxNetworkRetries = 4
+    private var lastNetworkChange = Date.distantPast
+
+    // Stall watching.
+    private var lastMove = Date()
+    private var lastPosition = -1.0
+    private var movingSince: Date?
+    private var monitorTask: Task<Void, Never>?
+    private var reconnectWork: Task<Void, Never>?
+    private var awaitingReconnect = false
+
+    /// Where to jump back to once a restarted film / episode is ready.
+    private var pendingResume: Double?
+    /// The stream failed while the iPad had no connection; start it again
+    /// as soon as one returns.
+    private var restartWhenOnline = false
+    /// The message on screen is about the connection, so a returning
+    /// connection should clear it and try again.
+    private var failedForNetwork = false
+    private weak var failedItem: AVPlayerItem?
+
     private var itemStatusObservation: NSKeyValueObservation?
+    private var timeControlObservation: NSKeyValueObservation?
     private var failureObserver: NSObjectProtocol?
+    private var networkToken: UUID?
 
     func play(_ channel: Channel) {
         attempt = 0
         transientRetries = 0
+        stallRestarts = 0
+        networkRetries = 0
+        lastNetworkChange = .distantPast
+        pendingResume = nil
+        restartWhenOnline = false
+        failedForNetwork = false
+        failedItem = nil
+        awaitingReconnect = false
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        currentChannel = nil
         diagnosisMessage = nil
+        statusNote = nil
 
         guard let first = channel.streams.first else {
             diagnosisMessage = "This item has nothing to play."
@@ -55,12 +106,23 @@ final class TapperPlayer: ObservableObject {
             diagnosisMessage = "This channel uses a format this app can't play (\(scheme))."
             return
         }
-        startStream(channel: channel, stream: first)
+        currentChannel = channel
+        startWatchingNetwork()
+        startMonitor()
+        startStream(channel: channel, stream: first, resumeAt: nil)
     }
 
-    private func startStream(channel: Channel, stream: StreamRef) {
+    private func startStream(channel: Channel, stream: StreamRef, resumeAt: Double?) {
         renderedFrames = false
         startedAt = Date()
+        lastMove = Date()
+        lastPosition = -1
+        movingSince = nil
+        awaitingReconnect = false
+        failedItem = nil
+        failedForNetwork = false
+        diagnosisMessage = nil
+        pendingResume = resumeAt
         isBuffering = true
 
         guard let url = URL(string: stream.url) else {
@@ -93,13 +155,30 @@ final class TapperPlayer: ObservableObject {
         // AVPlayer's own default; anything larger trades a slower start for
         // more cushion against the network drops/hiccups that show up as
         // stalls or rebuffering mid-stream.
-        item.preferredForwardBufferDuration = PlayerSettingsStore.shared.bufferSize.forwardBufferSeconds
+        //
+        // On mobile data, a hotspot or Low Data Mode the signal comes and
+        // goes, so never go below 20 seconds of cushion there, and hold the
+        // picture quality down (applyQuality) so each segment is smaller and
+        // finishes downloading before the signal changes.
+        let net = NetworkMonitor.shared.state
+        var buffer = PlayerSettingsStore.shared.bufferSize.forwardBufferSeconds
+        if isMetered(net) { buffer = max(buffer, 20) }
+        item.preferredForwardBufferDuration = buffer
+        applyQuality(to: item, state: net)
 
         tearDownObservers()
 
         let avPlayer = player ?? AVPlayer()
         avPlayer.replaceCurrentItem(with: item)
         if player == nil { player = avPlayer }
+
+        timeControlObservation = avPlayer.observe(\.timeControlStatus, options: [.new]) { [weak self] observedPlayer, _ in
+            guard let self else { return }
+            let status = observedPlayer.timeControlStatus
+            Task { @MainActor in
+                self.timeControlChanged(status)
+            }
+        }
 
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
             guard let self else { return }
@@ -112,8 +191,19 @@ final class TapperPlayer: ObservableObject {
                     // own fresh retry budget rather than inheriting however
                     // many of these were already spent getting here.
                     self.transientRetries = 0
+                    // A film or episode restarted after a drop goes back to
+                    // where it was rather than to the beginning.
+                    if let target = self.pendingResume {
+                        self.pendingResume = nil
+                        observedItem.seek(
+                            to: CMTime(seconds: target, preferredTimescale: 600),
+                            toleranceBefore: .positiveInfinity,
+                            toleranceAfter: .positiveInfinity,
+                            completionHandler: nil
+                        )
+                    }
                 case .failed:
-                    self.handleFailure(channel: channel, error: observedItem.error as NSError?)
+                    self.handleFailure(channel: channel, item: observedItem, error: observedItem.error as NSError?)
                 default:
                     break
                 }
@@ -127,14 +217,272 @@ final class TapperPlayer: ObservableObject {
         ) { [weak self] notification in
             let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
             Task { @MainActor in
-                self?.handleFailure(channel: channel, error: error)
+                self?.handleFailure(channel: channel, item: item, error: error)
             }
         }
 
         avPlayer.play()
     }
 
-    private func handleFailure(channel: Channel, error: NSError?) {
+    // MARK: - Connection awareness
+
+    private func isMetered(_ state: NetworkMonitor.State) -> Bool {
+        state.expensive || state.constrained
+    }
+
+    /// Caps (or uncaps) the picture quality for the current connection. Safe
+    /// to call on an item that is already playing: AVPlayer simply picks a
+    /// different variant from the next segment on.
+    private func applyQuality(to item: AVPlayerItem, state: NetworkMonitor.State) {
+        guard isMetered(state) else {
+            item.preferredPeakBitRate = 0
+            item.preferredMaximumResolution = .zero
+            return
+        }
+        var quality = PlayerSettingsStore.shared.mobileQuality
+        // Low Data Mode is an explicit request to use less data.
+        if state.constrained && quality == .auto { quality = .saver }
+        item.preferredPeakBitRate = quality.peakBitRate
+        item.preferredMaximumResolution = quality.maxResolution ?? .zero
+    }
+
+    private func startWatchingNetwork() {
+        guard networkToken == nil else { return }
+        networkToken = NetworkMonitor.shared.observe { [weak self] old, new in
+            guard let self else { return }
+            Task { @MainActor in
+                self.networkChanged(from: old, to: new)
+            }
+        }
+    }
+
+    private func networkChanged(from old: NetworkMonitor.State, to new: NetworkMonitor.State) {
+        guard currentChannel != nil, player != nil else { return }
+        AppLog.shared.log("NET", "\(old.interface) -> \(new.interface), online \(new.online)")
+
+        if let item = player?.currentItem { applyQuality(to: item, state: new) }
+
+        if !new.online {
+            // Whatever is already buffered keeps playing; the note shows
+            // once it runs out (monitorTick).
+            return
+        }
+
+        let cameBack = !old.online
+        let switched = old.online && old.interface != new.interface
+        guard cameBack || switched else { return }
+
+        lastNetworkChange = Date()
+        stallRestarts = 0
+        networkRetries = 0
+
+        // The message on screen is something other than a lost connection:
+        // a new connection won't change it.
+        if diagnosisMessage != nil && !failedForNetwork { return }
+
+        // Still playing from what was buffered: leave it be. If the old
+        // connection is dead it will run dry in a few seconds and
+        // monitorTick restarts it quickly (it is on a short fuse for the
+        // next minute). Restarting a healthy picture would only add a blip.
+        let healthy = player?.timeControlStatus == .playing
+            && diagnosisMessage == nil && !restartWhenOnline && !awaitingReconnect
+        if healthy { return }
+
+        restartWhenOnline = false
+        statusNote = cameBack ? "Back online - reconnecting..." : "Network changed - reconnecting..."
+        isBuffering = true
+        scheduleReconnect(after: 1.0)
+    }
+
+    /// Starts the current feed again after [seconds], keeping a film's place.
+    private func scheduleReconnect(after seconds: Double) {
+        reconnectWork?.cancel()
+        awaitingReconnect = true
+        reconnectWork = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.restartCurrent()
+        }
+    }
+
+    private func restartCurrent() {
+        guard let channel = currentChannel, channel.streams.indices.contains(attempt) else {
+            awaitingReconnect = false
+            return
+        }
+        startStream(channel: channel, stream: channel.streams[attempt], resumeAt: capturePosition())
+    }
+
+    /// For a film or episode (a finite duration), where playback has got to;
+    /// nil for live TV, which should come back at the live edge.
+    private func capturePosition() -> Double? {
+        if let item = player?.currentItem {
+            let duration = item.duration.seconds
+            let position = item.currentTime().seconds
+            if duration.isFinite, duration > 0, position.isFinite, position > 5 {
+                return position
+            }
+        }
+        return pendingResume
+    }
+
+    // MARK: - Stall watching
+
+    private func timeControlChanged(_ status: AVPlayer.TimeControlStatus) {
+        switch status {
+        case .playing:
+            if isBuffering { isBuffering = false }
+        case .waitingToPlayAtSpecifiedRate:
+            // Before the first frame the spinner is already up; this is the
+            // mid-stream "ran out of buffer" case.
+            if renderedFrames { isBuffering = true }
+        default:
+            break
+        }
+    }
+
+    private func startMonitor() {
+        guard monitorTask == nil else { return }
+        monitorTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                self.monitorTick()
+            }
+        }
+    }
+
+    private func monitorTick() {
+        guard let player, let channel = currentChannel,
+              diagnosisMessage == nil, !awaitingReconnect else {
+            lastMove = Date()
+            return
+        }
+        let now = Date()
+        let status = player.timeControlStatus
+        let position = player.currentTime().seconds
+
+        // Paused by the viewer (films) - nothing to watch for.
+        if status == .paused {
+            lastMove = now
+            lastPosition = position
+            movingSince = nil
+            return
+        }
+
+        let moving = status == .playing && position.isFinite && position != lastPosition
+        if position.isFinite { lastPosition = position }
+
+        if moving {
+            lastMove = now
+            if movingSince == nil { movingSince = now }
+            // Healthy for a while: give the next hiccup a fresh budget.
+            if let since = movingSince, now.timeIntervalSince(since) > 30 {
+                stallRestarts = 0
+                networkRetries = 0
+            }
+            if statusNote != nil { statusNote = nil }
+            return
+        }
+        movingSince = nil
+
+        let net = NetworkMonitor.shared.state
+        if !net.online {
+            // Nothing to fix until the connection returns, and time spent
+            // without one must not use up the restarts.
+            lastMove = now
+            if statusNote != "Waiting for network..." { statusNote = "Waiting for network..." }
+            if !isBuffering { isBuffering = true }
+            return
+        }
+
+        let stalledFor = now.timeIntervalSince(lastMove)
+        if stalledFor >= 4 && statusNote == nil {
+            statusNote = isMetered(net) ? "Weak connection - waiting..." : "Slow connection - waiting..."
+        }
+        if stalledFor >= stallLimit(net: net, vod: isFiniteItem(player)) {
+            recover(channel: channel)
+        }
+    }
+
+    private func isFiniteItem(_ player: AVPlayer) -> Bool {
+        let duration = player.currentItem?.duration.seconds ?? 0
+        return duration.isFinite && duration > 0
+    }
+
+    private func stallLimit(net: NetworkMonitor.State, vod: Bool) -> TimeInterval {
+        var limit: TimeInterval = renderedFrames ? 10 : 20
+        if isMetered(net) { limit *= 1.5 }
+        if vod { limit *= 2 }
+        // Just after the connection changed, a stream that was playing is
+        // most likely stuck on the old one - don't wait the full time.
+        if renderedFrames, Date().timeIntervalSince(lastNetworkChange) < 60 {
+            limit = min(limit, 8)
+        }
+        return limit
+    }
+
+    /// The picture froze and didn't come back: reconnect the same feed a few
+    /// times (a frozen connection usually just needs reopening), then move
+    /// on to an alternate feed, then explain.
+    private func recover(channel: Channel) {
+        if stallRestarts < maxStallRestarts, channel.streams.indices.contains(attempt) {
+            stallRestarts += 1
+            statusNote = "Reconnecting..."
+            isBuffering = true
+            AppLog.shared.log("PLAYER", "stalled, reconnecting (\(stallRestarts)/\(maxStallRestarts))")
+            restartCurrent()
+            return
+        }
+        let next = channel.streams.count > attempt + 1 ? channel.streams[attempt + 1] : nil
+        if let next, M3uParser.shared.isPlayable(url: next.url) {
+            attempt += 1
+            stallRestarts = 0
+            transientRetries = 0
+            statusNote = "Trying another feed..."
+            AppLog.shared.log("PLAYER", "stalled, trying alternate feed")
+            startStream(channel: channel, stream: next, resumeAt: capturePosition())
+            return
+        }
+        explain(httpStatus: nil, socketError: true, rawError: nil)
+    }
+
+    // MARK: - Failures
+
+    private func handleFailure(channel: Channel, item: AVPlayerItem, error: NSError?) {
+        // An item that was already replaced, or a failure already being
+        // handled (AVFoundation can report the same one twice).
+        guard item === player?.currentItem, failedItem !== item else { return }
+        failedItem = item
+
+        let (httpStatus, socketError) = classify(error: error)
+
+        // No connection at all: nothing to try until one returns. The network
+        // monitor restarts playback the moment it does.
+        if !NetworkMonitor.shared.state.online {
+            restartWhenOnline = true
+            isBuffering = true
+            statusNote = "Waiting for network..."
+            return
+        }
+
+        // A failure shortly after the connection changed is nearly always the
+        // old connection dying, or the provider not yet having noticed it
+        // closed (many limit how many connections one account may hold, and
+        // answer 403 / 429 / 509 until the old one times out). Retry the same
+        // feed with a growing pause rather than giving up or burning through
+        // the alternate feeds.
+        let providerLimit: Set<Int> = [403, 429, 458, 503, 509]
+        let looksLikeHandover = socketError || (httpStatus.map { providerLimit.contains($0) } ?? false)
+        if looksLikeHandover, networkRetries < maxNetworkRetries,
+           Date().timeIntervalSince(lastNetworkChange) < 90 {
+            networkRetries += 1
+            statusNote = "Reconnecting..."
+            isBuffering = true
+            scheduleReconnect(after: 2.0 * Double(networkRetries))
+            return
+        }
+
         // Try the next alternate feed before surfacing anything, same as
         // TapperPlayer.kt's onPlayerError - on a free playlist this
         // recovers a large share of failures invisibly.
@@ -142,14 +490,13 @@ final class TapperPlayer: ObservableObject {
         if let next, M3uParser.shared.isPlayable(url: next.url) {
             attempt += 1
             transientRetries = 0
-            startStream(channel: channel, stream: next)
+            startStream(channel: channel, stream: next, resumeAt: capturePosition())
             return
         }
-        let (httpStatus, socketError) = classify(error: error)
 
         // No HTTP status at all plus a recognized socket-error code (timed
         // out, connection lost, not connected, DNS failure - see classify
-        // above) looks like a dropped connection, not a real answer from
+        // below) looks like a dropped connection, not a real answer from
         // the server - retrying a definitive 403/404 would just ask the
         // same question again, but a connection that was lost can often be
         // reopened immediately. Same reasoning as the short retry already
@@ -159,11 +506,7 @@ final class TapperPlayer: ObservableObject {
         // ends playback outright instead of recovering on its own.
         if httpStatus == nil, socketError, transientRetries < maxTransientRetries {
             transientRetries += 1
-            let stream = channel.streams[attempt]
-            let delay = DispatchTimeInterval.milliseconds(600 * transientRetries)
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.startStream(channel: channel, stream: stream)
-            }
+            scheduleReconnect(after: 0.6 * Double(transientRetries))
             return
         }
 
@@ -198,6 +541,9 @@ final class TapperPlayer: ObservableObject {
     // to pull out once the real failure mode here is confirmed and handled.
     private func explain(httpStatus: Int?, socketError: Bool, rawError: NSError?) {
         isBuffering = false
+        statusNote = nil
+        awaitingReconnect = false
+        failedForNetwork = socketError
         let elapsedMs = Int64(Date().timeIntervalSince(startedAt) * 1000)
         let message = PlaybackDiagnosisBridge.shared.diagnose(
             httpStatus: Int32(httpStatus ?? 0),
@@ -205,7 +551,7 @@ final class TapperPlayer: ObservableObject {
             socketError: socketError,
             elapsedMs: elapsedMs,
             renderedFrames: renderedFrames,
-            networkReachable: true
+            networkReachable: NetworkMonitor.shared.state.online
         )
         if let rawError {
             diagnosisMessage = "\(message)\n\n(\(rawError.domain) \(rawError.code))"
@@ -217,6 +563,8 @@ final class TapperPlayer: ObservableObject {
     private func tearDownObservers() {
         itemStatusObservation?.invalidate()
         itemStatusObservation = nil
+        timeControlObservation?.invalidate()
+        timeControlObservation = nil
         if let failureObserver {
             NotificationCenter.default.removeObserver(failureObserver)
         }
@@ -224,6 +572,15 @@ final class TapperPlayer: ObservableObject {
     }
 
     func release() {
+        monitorTask?.cancel()
+        monitorTask = nil
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        if let networkToken {
+            NetworkMonitor.shared.remove(networkToken)
+        }
+        networkToken = nil
+        currentChannel = nil
         tearDownObservers()
         player?.pause()
         player = nil
