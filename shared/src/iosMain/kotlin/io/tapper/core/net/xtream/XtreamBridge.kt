@@ -91,6 +91,27 @@ object XtreamBridge {
     }
 
     /**
+     * Just the account check, for when the library itself is already on the
+     * device: confirms the login still works and refreshes the expiry and
+     * connection counts without downloading the catalogue again. [onResult]
+     * fires exactly once.
+     */
+    fun authenticate(
+        host: String,
+        username: String,
+        password: String,
+        onResult: (XtreamAccount?, String?) -> Unit,
+    ) {
+        scope.launch {
+            try {
+                onResult(XtreamClient(host, username, password).authenticate(), null)
+            } catch (t: Throwable) {
+                onResult(null, t.message ?: "Couldn't log in.")
+            }
+        }
+    }
+
+    /**
      * Episodes for one series - fetched on demand when a series is opened
      * rather than loaded up front for every series (see
      * XtreamClient.episodes's own doc comment for why). [onResult] fires
