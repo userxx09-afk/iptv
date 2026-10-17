@@ -107,8 +107,36 @@ final class EpgManager {
     private var refreshTask: Task<Void, Never>?
     private var activation = 0
     private var clock: Timer?
+    /// A film, episode or channel is on screen.
+    private var playbackActive = false
 
-    private init() {}
+    private init() {
+        // Back on Wi-Fi (or the connection returning) is the moment a guide
+        // that was held back gets its turn.
+        NetworkMonitor.shared.observe { [weak self] old, new in
+            let usable = new.online && !new.expensive && !new.constrained
+            let wasUsable = old.online && !old.expensive && !old.constrained
+            if usable && !wasUsable { self?.refreshIfStale() }
+        }
+    }
+
+    /// The player opened or closed. A guide refresh is a large download and
+    /// a long parse; it waits until nothing is playing, then runs if it is
+    /// still due.
+    func playbackChanged(active: Bool) {
+        playbackActive = active
+        if !active { refreshIfStale() }
+    }
+
+    /// Why a due refresh should wait, or nil to go ahead. A refresh the
+    /// viewer asks for (Settings) always runs.
+    private func deferReason() -> String? {
+        if playbackActive { return "once playback ends" }
+        let net = NetworkMonitor.shared.state
+        if !net.online { return "when you're back online" }
+        if net.expensive || net.constrained { return "on Wi-Fi" }
+        return nil
+    }
 
     // MARK: - Lifecycle
 
@@ -210,6 +238,12 @@ final class EpgManager {
         let last = max(db.fetchedAt(source.id), db.fetchedAt(source.id + "#supp"))
         let lastAttempt = UserDefaults.standard.integer(forKey: attemptKey(source.id))
         if now - last > Self.staleAfter && now - lastAttempt > Self.retryAfter {
+            if let reason = deferReason() {
+                AppLog.shared.log("EPG", "Guide refresh waits \(reason)")
+                let age = last > 0 ? "Guide updated \(Self.ago(now - last)) ago. " : ""
+                EpgStatus.shared.post("\(age)Will refresh \(reason).", refreshing: false)
+                return
+            }
             refresh()
         } else if last > 0 {
             EpgStatus.shared.post("Guide updated \(Self.ago(now - last)) ago.", refreshing: false)
