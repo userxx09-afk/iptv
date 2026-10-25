@@ -110,6 +110,14 @@ fun PlayerScreen(
     var livePosition by remember(channel.id) { mutableStateOf(0L) }
     var liveDuration by remember(channel.id) { mutableStateOf(0L) }
     var isPlaying by remember(channel.id) { mutableStateOf(true) }
+    // Commercial-break mute (live only, Right on the remote). Whole seconds
+    // left, so the state only changes - and the screen only redraws - once a
+    // second while muted, never while sound is on.
+    var muteLeftSec by remember { mutableIntStateOf(0) }
+    // "Sound on" confirmation after an early unmute, gone after a moment.
+    var soundOnFlash by remember { mutableStateOf(false) }
+    // What the stream says about ad markers - see TapperPlayer.markerSummary.
+    var markerLine by remember(channel.id) { mutableStateOf("") }
 
     // In-player channel browsing, live only - there is no "next channel" to
     // browse on an on-demand item. 0 = plain playback. 1 = the compact guide
@@ -175,6 +183,31 @@ fun PlayerScreen(
             onPlaying = { status = null },
             bufferSize = bufferSize,
         )
+    }
+
+    fun toggleMute() {
+        val minutes = (context.applicationContext as? io.tapper.firetv.TapperApp)
+            ?.playerSettings?.muteMinutes ?: 3
+        val nowMuted = player.toggleMute(minutes * 60_000L)
+        muteLeftSec = ((player.muteRemainingMs() + 999) / 1000).toInt()
+        soundOnFlash = !nowMuted
+    }
+
+    // Counts the mute down, and notices it ending on its own. Cheap: a clock
+    // read twice a second, and state is only written when it actually changes.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(500)
+            val left = ((player.muteRemainingMs() + 999) / 1000).toInt()
+            if (left != muteLeftSec) muteLeftSec = left
+            if (overlayVisible) {
+                val m = player.markerSummary()
+                if (m != markerLine) markerLine = m
+            }
+        }
+    }
+    LaunchedEffect(soundOnFlash) {
+        if (soundOnFlash) { delay(1500); soundOnFlash = false }
     }
 
     // Re-tunes whenever the index changes; also covers the initial channel.
@@ -432,6 +465,10 @@ fun PlayerScreen(
                             if (onMinimize != null) onMinimize() else openGuide(2)
                             true
                         } else false
+                    // Right: mute for a commercial break (length set in
+                    // Settings), or press again to bring the sound back early.
+                    Key.DirectionRight ->
+                        if (channel.kind == ContentKind.LIVE) { toggleMute(); true } else false
                     Key.DirectionCenter, Key.Enter ->
                         if (channel.kind == ContentKind.LIVE) { overlayVisible = !overlayVisible; true }
                         else { showControls = true; true }
@@ -493,7 +530,7 @@ fun PlayerScreen(
                 Spacer(Modifier.height(12.dp))
                 Text(
                     if (channel.kind == ContentKind.LIVE)
-                        "Up / Down to change channel  ·  Back to return"
+                        "Up / Down to change channel  ·  Right to mute a break  ·  Back to return"
                     else "Down for playback controls  ·  Back to return",
                     style = MaterialTheme.typography.bodyMedium, color = Dim,
                 )
@@ -526,6 +563,35 @@ fun PlayerScreen(
                 programme = nowPlaying(channel),
                 modifier = Modifier.align(Alignment.BottomStart).padding(48.dp),
             )
+        }
+
+        if (!minimized && channel.kind == ContentKind.LIVE) {
+            if (muteLeftSec > 0) {
+                Text(
+                    "Muted  ${muteLeftSec / 60}:${(muteLeftSec % 60).toString().padStart(2, '0')}  ·  Right to unmute",
+                    style = MaterialTheme.typography.bodyLarge, color = Ink,
+                    modifier = Modifier.align(Alignment.TopStart).padding(48.dp)
+                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            } else if (soundOnFlash) {
+                Text(
+                    "Sound on",
+                    style = MaterialTheme.typography.bodyLarge, color = Ink,
+                    modifier = Modifier.align(Alignment.TopStart).padding(48.dp)
+                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+            if (overlayVisible && overlayLevel == 0 && status == null && !showControls && markerLine.isNotEmpty()) {
+                Text(
+                    markerLine,
+                    style = MaterialTheme.typography.bodyMedium, color = Dim,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(48.dp)
+                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
 
         if (minimized) {
