@@ -35,8 +35,14 @@ android {
         // files rather than the variable Archivo TTF: FontVariation needs 26.
         minSdk = 25
         targetSdk = 34
-        versionCode = 32
-        versionName = "0.14.4"
+        // The build number is the GitHub Actions run number, so it rises on
+        // every build by itself and matches the "build-N" release the APK is
+        // published under. (It was a hand-edited constant, which is why
+        // Settings kept saying build 32.) A local build outside CI falls back
+        // to the constant.
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 33
+        // Bump this by hand when features change.
+        versionName = "0.15.0"
     }
     buildTypes {
         release {
