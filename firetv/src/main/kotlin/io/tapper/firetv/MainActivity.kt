@@ -236,6 +236,7 @@ class MainActivity : ComponentActivity() {
             // next cross-device sync.
             var watchRevision by remember { mutableIntStateOf(0) }
             var bufferSize by remember { mutableStateOf(app.playerSettings.bufferSize) }
+            var muteMinutes by remember { mutableStateOf(app.playerSettings.muteMinutes) }
             var cacheHours by remember { mutableStateOf(app.playerSettings.cacheHours) }
             var episodes by remember { mutableStateOf<List<Channel>>(emptyList()) }
             var episodesLoading by remember { mutableStateOf(false) }
@@ -895,6 +896,10 @@ class MainActivity : ComponentActivity() {
                         bufferSize = bufferSize,
                         onSetBufferSize = {
                             bufferSize = it; app.playerSettings.bufferSize = it
+                        },
+                        muteMinutes = muteMinutes,
+                        onSetMuteMinutes = {
+                            muteMinutes = it; app.playerSettings.muteMinutes = it
                         },
                         cacheHours = cacheHours,
                         onSetCacheHours = {
