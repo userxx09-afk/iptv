@@ -14,6 +14,7 @@ struct SettingsView: View {
 
     @State private var buffer = PlayerSettingsStore.shared.bufferSize
     @State private var mobileQuality = PlayerSettingsStore.shared.mobileQuality
+    @State private var muteMinutes = PlayerSettingsStore.shared.muteMinutes
     @State private var tmdbKey = MovieMetadataStore.shared.apiKey
     @State private var infoCleared = false
     @State private var confirmClearWatch = false
@@ -223,10 +224,19 @@ struct SettingsView: View {
                     .onChange(of: mobileQuality) { _, newValue in
                         PlayerSettingsStore.shared.mobileQuality = newValue
                     }
+                    Picker("Commercial mute", selection: $muteMinutes) {
+                        ForEach(PlayerSettingsStore.muteChoices, id: \.self) { m in
+                            Text("\(m) min").tag(m)
+                        }
+                    }
+                    .onChange(of: muteMinutes) { _, newValue in
+                        PlayerSettingsStore.shared.muteMinutes = newValue
+                    }
                 } header: {
                     Text("Playback")
                 } footer: {
-                    Text(buffer.description + " " + mobileQuality.description + " Takes effect the next time something is played. On mobile data the app always keeps at least 20 seconds of cushion, and reconnects by itself when you move between networks.")
+                    Text("The mute button on live TV silences the channel for \(muteMinutes) \(muteMinutes == 1 ? "minute" : "minutes"), then the sound returns by itself. ")
+                    + Text(buffer.description + " " + mobileQuality.description + " Takes effect the next time something is played. On mobile data the app always keeps at least 20 seconds of cushion, and reconnects by itself when you move between networks.")
                 }
 
                 Section {

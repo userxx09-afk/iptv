@@ -136,6 +136,9 @@ struct PlayerView: View {
 
             if isLive {
                 if controlsVisible { liveOverlay.transition(.opacity) }
+                // Stays on screen while muted even when the rest of the
+                // overlay has faded, so it is always clear why it is silent.
+                if let ends = controller.muteEndsAt { mutePill(endsAt: ends) }
                 if showChannels { channelPanel.transition(.move(edge: .trailing)) }
             } else {
                 VStack {
@@ -224,6 +227,7 @@ struct PlayerView: View {
             HStack(spacing: 6) {
                 closeButton
                 Spacer()
+                muteButton
                 AirPlayButton()
                     .frame(width: 44, height: 44)
                 if playlist.count > 1 {
@@ -254,6 +258,9 @@ struct PlayerView: View {
                     Text(current.name)
                         .font(.title3.bold())
                         .lineLimit(1)
+                    Text(controller.markerSummary.isEmpty ? "Ad markers: none seen" : controller.markerSummary)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
                     if let programme = nowProgramme {
                         HStack(spacing: 8) {
                             Text("NOW")
@@ -304,6 +311,53 @@ struct PlayerView: View {
                 LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea()
             )
+        }
+    }
+
+    // MARK: - Commercial mute
+
+    /// Silences the channel for the length chosen in Settings, then the sound
+    /// returns by itself. Tapping again while muted brings it back sooner.
+    private var muteButton: some View {
+        let minutes = PlayerSettingsStore.shared.muteMinutes
+        let muted = controller.muteEndsAt != nil
+        return Button {
+            controller.toggleMute(minutes: minutes)
+            scheduleHide()
+        } label: {
+            Label(muted ? "Sound on" : "Mute \(minutes) min",
+                  systemImage: muted ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.black.opacity(0.45))
+                .clipShape(Capsule())
+        }
+    }
+
+    private func mutePill(endsAt: Date) -> some View {
+        VStack {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let left = max(Int(endsAt.timeIntervalSince(context.date).rounded(.up)), 0)
+                Button {
+                    controller.endMute()
+                } label: {
+                    Label("Muted \(playbackClock(Double(left)))  -  tap to unmute",
+                          systemImage: "speaker.slash.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.7))
+                        .clipShape(Capsule())
+                }
+                .onChange(of: left) { _, value in
+                    if value == 0 { controller.endMute() }
+                }
+            }
+            .padding(.top, 10)
+            Spacer()
         }
     }
 

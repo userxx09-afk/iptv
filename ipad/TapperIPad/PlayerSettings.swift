@@ -111,6 +111,18 @@ final class PlayerSettingsStore {
         set { defaults.set(newValue.rawValue, forKey: key) }
     }
 
+    /// How long the commercial-break mute lasts, in minutes - the iPad
+    /// counterpart to Fire TV's muteMinutes. Sound comes back by itself.
+    static let muteChoices = [1, 2, 3, 4, 5, 8, 10]
+
+    var muteMinutes: Int {
+        get {
+            let v = defaults.integer(forKey: "tapper.player.muteMinutes")
+            return v > 0 ? min(v, 15) : 3
+        }
+        set { defaults.set(max(1, min(newValue, 15)), forKey: "tapper.player.muteMinutes") }
+    }
+
     var mobileQuality: MobileQuality {
         get { MobileQuality(rawValue: defaults.string(forKey: "tapper.player.mobileQuality") ?? "") ?? .auto }
         set { defaults.set(newValue.rawValue, forKey: "tapper.player.mobileQuality") }

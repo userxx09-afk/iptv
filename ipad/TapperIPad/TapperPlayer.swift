@@ -72,12 +72,65 @@ final class TapperPlayer: ObservableObject {
     private var failedForNetwork = false
     private weak var failedItem: AVPlayerItem?
 
+    // Commercial-break mute: a fixed-length, viewer-triggered mute. Sound
+    // returns by itself when the time is up, or sooner on a second tap, and a
+    // channel change always ends it. Kept here (not in the view) because every
+    // reconnect builds a new item and must come back up still muted.
+    /// When the current mute ends; nil when sound is on.
+    @Published private(set) var muteEndsAt: Date?
+    private var muteTask: Task<Void, Never>?
+
+    // Ad-marker diagnostic: what the stream says about ad breaks, if anything.
+    // Counted and logged, never acted on - it is there so we can tell whether
+    // a provider sends markers at all.
+    @Published private(set) var markerSummary = ""
+    private var markerCount = 0
+    private var markerCollector: AVPlayerItemMetadataCollector?
+    private var markerListener: DateRangeListener?
+
     private var itemStatusObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
     private var failureObserver: NSObjectProtocol?
     private var networkToken: UUID?
 
+    /// Mutes for `minutes`, or - when already muted - brings the sound back.
+    /// Returns true if it is now muted.
+    @discardableResult
+    func toggleMute(minutes: Int) -> Bool {
+        if muteEndsAt != nil { endMute(); return false }
+        let seconds = Double(max(minutes, 1) * 60)
+        muteEndsAt = Date().addingTimeInterval(seconds)
+        player?.isMuted = true
+        muteTask?.cancel()
+        muteTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if Task.isCancelled { return }
+            self?.endMute()
+        }
+        return true
+    }
+
+    func endMute() {
+        muteTask?.cancel()
+        muteTask = nil
+        muteEndsAt = nil
+        player?.isMuted = false
+    }
+
+    private func noteDateRanges(_ labels: [String]) {
+        guard !labels.isEmpty else { return }
+        let first = markerCount == 0
+        markerCount += labels.count
+        markerSummary = "Ad markers seen: HLS date ranges x\(markerCount)"
+        if first {
+            AppLog.shared.log("ADS", "Stream carries ad/date-range markers: \(labels.joined(separator: ", "))")
+        }
+    }
+
     func play(_ channel: Channel) {
+        endMute()
+        markerCount = 0
+        markerSummary = ""
         attempt = 0
         transientRetries = 0
         stallRestarts = 0
@@ -169,8 +222,20 @@ final class TapperPlayer: ObservableObject {
 
         tearDownObservers()
 
+        // HLS date ranges (#EXT-X-DATERANGE) are where a provider's ad-break
+        // cues turn up, when it keeps them at all.
+        let listener = DateRangeListener { [weak self] labels in
+            Task { @MainActor in self?.noteDateRanges(labels) }
+        }
+        let collector = AVPlayerItemMetadataCollector(identifiers: nil, classifyingLabels: nil)
+        collector.setDelegate(listener, queue: DispatchQueue.main)
+        item.add(collector)
+        markerListener = listener
+        markerCollector = collector
+
         let avPlayer = player ?? AVPlayer()
-        avPlayer.isMuted = false
+        // A mute in progress carries over a reconnect.
+        avPlayer.isMuted = muteEndsAt != nil
         avPlayer.replaceCurrentItem(with: item)
         if player == nil { player = avPlayer }
 
@@ -606,6 +671,8 @@ final class TapperPlayer: ObservableObject {
     }
 
     func release() {
+        muteTask?.cancel()
+        muteTask = nil
         monitorTask?.cancel()
         monitorTask = nil
         reconnectWork?.cancel()
@@ -618,5 +685,33 @@ final class TapperPlayer: ObservableObject {
         tearDownObservers()
         player?.pause()
         player = nil
+    }
+}
+
+/// Receives HLS date-range metadata - the `#EXT-X-DATERANGE` tags an ad break
+/// is announced with - and reports a short label for each new one. Separate
+/// from TapperPlayer because AVFoundation delivers it through an Objective-C
+/// delegate, which needs an NSObject.
+private final class DateRangeListener: NSObject, AVPlayerItemMetadataCollectorPushDelegate {
+    private let onNew: ([String]) -> Void
+
+    init(onNew: @escaping ([String]) -> Void) {
+        self.onNew = onNew
+    }
+
+    func metadataCollector(
+        _ metadataCollector: AVPlayerItemMetadataCollector,
+        didCollect metadataGroups: [AVDateRangeMetadataGroup],
+        indexesOfNewGroups: IndexSet,
+        indexesOfModifiedGroups: IndexSet
+    ) {
+        var labels: [String] = []
+        for index in indexesOfNewGroups where metadataGroups.indices.contains(index) {
+            let group = metadataGroups[index]
+            let keys = group.items.compactMap { $0.key as? String }
+            let scte = keys.contains { $0.uppercased().contains("SCTE") }
+            labels.append(scte ? "SCTE-35 date range" : (group.classifyingLabel ?? "date range"))
+        }
+        if !labels.isEmpty { onNew(labels) }
     }
 }
