@@ -80,6 +80,9 @@ fun SettingsScreen(
     onSetResumeLast: (Boolean) -> Unit,
     bufferSize: BufferSize,
     onSetBufferSize: (BufferSize) -> Unit,
+    /** Minutes the Right-button commercial mute lasts. */
+    muteMinutes: Int,
+    onSetMuteMinutes: (Int) -> Unit,
     /** Hours a downloaded playlist is reused before a fresh copy is fetched. */
     cacheHours: Int,
     onSetCacheHours: (Int) -> Unit,
@@ -510,6 +513,22 @@ fun SettingsScreen(
         Spacer(Modifier.height(6.dp))
         Text(
             bufferSize.description + " Takes effect the next time something is played.",
+            style = MaterialTheme.typography.bodyMedium, color = Dim,
+        )
+
+        Spacer(Modifier.height(28.dp))
+        Text("COMMERCIAL MUTE", style = MaterialTheme.typography.bodyMedium, color = Dim)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            io.tapper.firetv.data.PlayerSettingsStore.MUTE_MINUTE_CHOICES.forEach { m ->
+                Chip("$m min", muteMinutes == m) { onSetMuteMinutes(m) }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "While watching live TV, press Right on the remote to mute for $muteMinutes " +
+                "${if (muteMinutes == 1) "minute" else "minutes"} - sound comes back by itself, " +
+                "or press Right again to bring it back sooner. Changing channel also ends it.",
             style = MaterialTheme.typography.bodyMedium, color = Dim,
         )
 
