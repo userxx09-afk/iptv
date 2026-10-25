@@ -62,7 +62,17 @@ class PlayerSettingsStore(context: Context) {
         get() = prefs.getInt("cache_hours", DEFAULT_CACHE_HOURS).coerceIn(MIN_CACHE_HOURS, MAX_CACHE_HOURS)
         set(v) = prefs.edit().putInt("cache_hours", v.coerceIn(MIN_CACHE_HOURS, MAX_CACHE_HOURS)).apply()
 
+    /** How long the commercial-break mute lasts, in minutes. Pressing Right
+     *  while watching live TV mutes for this long, then sound returns by
+     *  itself. Set from Settings > Playback. */
+    var muteMinutes: Int
+        get() = prefs.getInt("mute_minutes", DEFAULT_MUTE_MINUTES).coerceIn(1, MAX_MUTE_MINUTES)
+        set(v) = prefs.edit().putInt("mute_minutes", v.coerceIn(1, MAX_MUTE_MINUTES)).apply()
+
     companion object {
+        const val DEFAULT_MUTE_MINUTES = 3
+        const val MAX_MUTE_MINUTES = 15
+        val MUTE_MINUTE_CHOICES = listOf(1, 2, 3, 4, 5, 8, 10)
         const val DEFAULT_CACHE_HOURS = 30
         const val MIN_CACHE_HOURS = 1
         const val MAX_CACHE_HOURS = 720
