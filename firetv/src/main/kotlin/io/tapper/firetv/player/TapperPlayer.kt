@@ -7,13 +7,16 @@ import android.net.NetworkCapabilities
 import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Metadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsManifest
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.PlayerView
@@ -99,6 +102,21 @@ class TapperPlayer(
     private var failed = false
     private var offlineSinceMs = 0L
 
+    // Commercial-break mute. A fixed-length, viewer-triggered mute: sound
+    // returns by itself when the time is up, or sooner on a second press, and
+    // a channel change always ends it. The deadline lives here rather than in
+    // the screen because the player is torn down and rebuilt by every
+    // reconnect - the new one must come back up still muted.
+    private var muteUntilMs = 0L          // SystemClock.elapsedRealtime() deadline; 0 = not muted
+    private var muteJob: Job? = null
+
+    // Ad-marker diagnostic: what the stream itself says about ad breaks, if
+    // anything. Counted, never acted on - it exists so we can tell whether a
+    // provider sends markers at all before building anything that relies on them.
+    private val markerCounts = LinkedHashMap<String, Int>()
+    private val seenPlaylistTags = HashSet<String>()
+    private var otherMetadata = 0
+
     companion object {
         /** Frozen / buffering this long after picture has started => reconnect. */
         private const val STALL_AFTER_PLAY_MS = 10_000L
@@ -145,8 +163,49 @@ class TapperPlayer(
         p.seekTo(if (dur > 0) target.coerceIn(0, dur) else target.coerceAtLeast(0))
     }
 
+    /** Milliseconds of mute left; 0 when sound is on. */
+    fun muteRemainingMs(): Long =
+        if (muteUntilMs == 0L) 0L else (muteUntilMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+
+    /** Mutes for [ms], or - when already muted - brings the sound back. */
+    fun toggleMute(ms: Long): Boolean {
+        if (muteRemainingMs() > 0L) { clearMute(); return false }
+        muteUntilMs = SystemClock.elapsedRealtime() + ms
+        player?.volume = 0f
+        muteJob?.cancel()
+        muteJob = scope.launch {
+            delay(ms)
+            clearMute()
+        }
+        return true
+    }
+
+    private fun clearMute() {
+        muteJob?.cancel(); muteJob = null
+        muteUntilMs = 0L
+        player?.volume = 1f
+    }
+
+    /** One line for the screen: what ad markers this stream has shown. */
+    fun markerSummary(): String {
+        val parts = markerCounts.entries.map { "${it.key} x${it.value}" }
+        return when {
+            parts.isNotEmpty() -> "Ad markers seen: " + parts.joinToString(", ")
+            otherMetadata > 0 -> "Ad markers: none seen (other timed data x$otherMetadata)"
+            else -> "Ad markers: none seen"
+        }
+    }
+
+    private fun noteMarker(label: String) {
+        val first = !markerCounts.containsKey(label)
+        markerCounts[label] = (markerCounts[label] ?: 0) + 1
+        if (first) android.util.Log.i("TapperPlayer", "ad marker first seen: $label")
+    }
+
     fun play(channel: Channel, resumeMs: Long? = null) {
         current = channel
+        clearMute()
+        markerCounts.clear(); seenPlaylistTags.clear(); otherMetadata = 0
         attempt = 0
         stallRestarts = 0
         pendingResumeMs = resumeMs
@@ -205,6 +264,8 @@ class TapperPlayer(
                 view?.player = it
             }
 
+        // A rebuilt player starts at full volume; a mute in progress carries over.
+        exo.volume = if (muteRemainingMs() > 0L) 0f else 1f
         exo.setMediaItem(MediaItem.fromUri(stream.url))
         exo.prepare()
         // Seek after prepare: seeking before the timeline is known is ignored
@@ -345,6 +406,39 @@ class TapperPlayer(
             onPlaying()
         }
 
+        // Timed metadata riding in the stream. SCTE-35 ad cues arrive here
+        // (as SpliceInsertCommand, TimeSignalCommand and friends) when a
+        // provider leaves them in; ID3 tags and the like are counted apart so
+        // they don't pass for ad markers.
+        override fun onMetadata(metadata: Metadata) {
+            for (i in 0 until metadata.length()) {
+                val name = metadata.get(i).javaClass.simpleName
+                if (name.contains("Splice") || name.contains("TimeSignal") || name.contains("Scte")) {
+                    noteMarker("SCTE-35 $name")
+                } else {
+                    otherMetadata++
+                }
+            }
+        }
+
+        // HLS only: the playlist is refreshed every few seconds on a live
+        // channel, and ad breaks show up in it as DATERANGE / CUE-OUT / SCTE35
+        // tag lines. Reading the tags ExoPlayer has already parsed costs nothing.
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            val hls = player?.currentManifest as? HlsManifest ?: return
+            for (tag in hls.mediaPlaylist.tags) {
+                val label = when {
+                    tag.startsWith("#EXT-X-DATERANGE") -> "HLS DATERANGE"
+                    tag.startsWith("#EXT-X-CUE-OUT") -> "HLS CUE-OUT"
+                    tag.startsWith("#EXT-OATCLS-SCTE35") || tag.startsWith("#EXT-X-SCTE35") -> "HLS SCTE35"
+                    else -> continue
+                }
+                // The same tag stays in the playlist across many refreshes;
+                // count each distinct line once.
+                if (seenPlaylistTags.size < 500 && seenPlaylistTags.add(tag)) noteMarker(label)
+            }
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             val channel = current ?: return
 
@@ -430,6 +524,7 @@ class TapperPlayer(
     }.getOrDefault(true)
 
     fun release() {
+        muteJob?.cancel()
         monitorJob?.cancel()
         networkJob?.cancel()
         networkCallback?.let { cb ->
