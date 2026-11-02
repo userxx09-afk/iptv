@@ -39,9 +39,29 @@ struct TvSource: Identifiable, Codable, Equatable {
     /// added - only iptv-org above is permanent.
     static let prime4tv = TvSource(
         id: "xtream-prime4tv-hidden",
-        name: "Prime4TV",
+        name: "Old Prime4TV",
         kind: .xtream,
         location: "http://line.prime4tv.com",
+        epgUrlOverride: nil,
+        builtIn: false
+    )
+
+    /// The two newer Prime accounts. Both accept any of the provider's server
+    /// addresses; line.prime-43.com is used for each.
+    static let primeAccount1 = TvSource(
+        id: "xtream-prime-account-1",
+        name: "Prime Account 1",
+        kind: .xtream,
+        location: "http://line.prime-43.com",
+        epgUrlOverride: nil,
+        builtIn: false
+    )
+
+    static let primeAccount2 = TvSource(
+        id: "xtream-prime-account-2",
+        name: "Prime Account 2",
+        kind: .xtream,
+        location: "http://line.prime-43.com",
         epgUrlOverride: nil,
         builtIn: false
     )
@@ -58,9 +78,40 @@ final class SourceStore {
     private let sourcesKey = "tapper.sources"
     private let activeKey = "tapper.activeSourceId"
     private let seededPrime4tvKey = "tapper.seededPrime4tv"
+    private let seededPrimeAccountsKey = "tapper.seededPrimeAccounts"
 
     private init() {
         seedPrime4tvIfNeeded()
+        renameOldPrime4tv()
+        seedPrimeAccountsIfNeeded()
+    }
+
+    /// The original panel was relabelled "Old Prime4TV" when the two newer
+    /// accounts were added. A copy added earlier under the old label is
+    /// renamed in place - same id, so credentials and history stay attached.
+    private func renameOldPrime4tv() {
+        var list = rawSources()
+        guard let i = list.firstIndex(where: { $0.id == TvSource.prime4tv.id && $0.name == "Prime4TV" }) else { return }
+        list[i].name = TvSource.prime4tv.name
+        saveRaw(list)
+    }
+
+    /// Adds the two newer Prime accounts once, the first time this runs on a
+    /// device. Same one-time flag approach as Prime4TV above, so removing
+    /// either one sticks.
+    private func seedPrimeAccountsIfNeeded() {
+        guard !defaults.bool(forKey: seededPrimeAccountsKey) else { return }
+        defaults.set(true, forKey: seededPrimeAccountsKey)
+        var current = rawSources()
+        let accounts: [(TvSource, String, String)] = [
+            (TvSource.primeAccount1, "5da5827d33", "3901889afd39"),
+            (TvSource.primeAccount2, "3250e96279", "30f470082b39"),
+        ]
+        for (source, user, pass) in accounts where !current.contains(where: { $0.id == source.id }) {
+            CredentialVault.put(sourceId: source.id, username: user, password: pass)
+            current.append(source)
+        }
+        saveRaw(current)
     }
 
     /// Adds Prime4TV (with its credentials) exactly once, the first time
