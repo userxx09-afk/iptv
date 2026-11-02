@@ -58,10 +58,11 @@ fun SettingsScreen(
     onClearLogoFolder: (TvSource) -> Unit,
     onRefreshGuide: () -> Unit,
     onClearCache: () -> Unit,
-    /** One tap, not the ten-tap gesture this replaces as the reliable way to
-     *  do the same thing - see MainActivity's addHiddenXtreamSource. */
-    hiddenSourceAdded: Boolean,
-    onAddHiddenSource: () -> Unit,
+    /** Ready-made services, one tap each - see MainActivity's PRESET_SOURCES.
+     *  Also what the ten-tap gesture on "Settings" used to reach, for the
+     *  first of them. */
+    presets: List<PresetSource>,
+    onAddPreset: (id: String) -> Unit,
     supplementalEpgSources: List<SupplementalEpgSource>,
     onAddSupplementalEpg: (name: String, guideUrl: String, channelIdsCsv: String) -> Unit,
     onRemoveSupplementalEpg: (id: String) -> Unit,
@@ -274,14 +275,21 @@ fun SettingsScreen(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip("Add IPTV service", false, onAddSource)
-            if (hiddenSourceAdded) {
-                Text("Prime4TV source added — switch to it above.",
-                    style = MaterialTheme.typography.bodyMedium, color = Dim)
-            } else {
-                Chip("Add Prime4TV source", false, onAddHiddenSource)
+        Chip("Add IPTV service", false, onAddSource)
+        val notAdded = presets.filter { !it.added }
+        if (notAdded.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                notAdded.forEach { p -> Chip("Add ${p.label}", false) { onAddPreset(p.id) } }
             }
+        }
+        val added = presets.filter { it.added }
+        if (added.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Added: ${added.joinToString(", ") { it.label }} — switch to them above.",
+                style = MaterialTheme.typography.bodyMedium, color = Dim,
+            )
         }
 
         Spacer(Modifier.height(28.dp))
@@ -774,3 +782,6 @@ private fun SettingField(
 /** Strips everything after the host: Xtream paths contain credentials. */
 private fun hostOnly(url: String): String =
     Regex("""^(https?://)?([^/]+)""").find(url)?.groupValues?.get(2) ?: url
+
+/** One ready-made service in Settings, and whether it has been added yet. */
+data class PresetSource(val id: String, val label: String, val added: Boolean)
