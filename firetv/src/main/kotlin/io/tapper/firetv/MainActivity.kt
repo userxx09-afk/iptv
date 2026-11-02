@@ -192,13 +192,25 @@ class MainActivity : ComponentActivity() {
             // this holdover ten-tap gesture on "Settings" itself for anyone
             // who already knew about it. Idempotent either way.
             val hiddenSourceId = "xtream-prime4tv-hidden"
-            fun addHiddenXtreamSource() {
-                if (sources.none { it.id == hiddenSourceId }) {
-                    app.vault.put(hiddenSourceId, "70405ae64f", "ae1752cd23")
-                    app.sourceStore.add(
-                        TvSource(hiddenSourceId, "Prime4TV", TvSource.Kind.XTREAM, "http://line.prime4tv.com")
-                    )
+            fun addPreset(id: String) {
+                val def = PRESET_SOURCES.firstOrNull { it.id == id } ?: return
+                if (sources.none { it.id == def.id }) {
+                    app.vault.put(def.id, def.username, def.password)
+                    app.sourceStore.add(TvSource(def.id, def.label, TvSource.Kind.XTREAM, def.host))
                     sources = app.sourceStore.all()
+                }
+            }
+            fun addHiddenXtreamSource() = addPreset(hiddenSourceId)
+            // The original panel was relabelled "Old Prime4TV" when the two
+            // newer accounts were added. A copy already added under the old
+            // label is renamed in place (id, credentials and watch history
+            // are untouched).
+            LaunchedEffect(Unit) {
+                val old = app.sourceStore.all().firstOrNull { it.id == hiddenSourceId && it.name == "Prime4TV" }
+                if (old != null) {
+                    app.sourceStore.update(old.copy(name = "Old Prime4TV"))
+                    sources = app.sourceStore.all()
+                    if (active.id == hiddenSourceId) active = app.sourceStore.active()
                 }
             }
             // Counted here in the screen-stack root rather than inside
@@ -831,8 +843,8 @@ class MainActivity : ComponentActivity() {
                         },
                         onRefreshGuide = { refreshEpg(catalogue) },
                         onClearCache = { app.repository.clearCache() },
-                        hiddenSourceAdded = sources.any { it.id == hiddenSourceId },
-                        onAddHiddenSource = { addHiddenXtreamSource() },
+                        presets = PRESET_SOURCES.map { PresetSource(it.id, it.label, sources.any { s -> s.id == it.id }) },
+                        onAddPreset = { addPreset(it) },
                         supplementalEpgSources = supplementalEpgSources,
                         onAddSupplementalEpg = { name, url, channelIdsCsv ->
                             val ids = channelIdsCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
@@ -1164,3 +1176,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+/** A ready-made Xtream service that Settings can add in one tap. */
+private data class PresetDef(
+    val id: String,
+    val label: String,
+    val username: String,
+    val password: String,
+    val host: String,
+)
+
+private val PRESET_SOURCES = listOf(
+    PresetDef("xtream-prime4tv-hidden", "Old Prime4TV", "70405ae64f", "ae1752cd23", "http://line.prime4tv.com"),
+    PresetDef("xtream-prime-account-1", "Prime Account 1", "5da5827d33", "3901889afd39", "http://line.prime-43.com"),
+    PresetDef("xtream-prime-account-2", "Prime Account 2", "3250e96279", "30f470082b39", "http://line.prime-43.com"),
+)
