@@ -7,6 +7,7 @@ import java.io.StringWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import io.tapper.firetv.data.AppUpdater
 import io.tapper.firetv.data.CredentialVault
 import io.tapper.firetv.data.EpgDatabase
 import io.tapper.firetv.data.EpgOverrideStore
@@ -41,6 +42,7 @@ class TapperApp : Application() {
     lateinit var playerSettings: PlayerSettingsStore; private set
     lateinit var navHome: NavHomeStore; private set
     lateinit var movieMetadata: MovieMetadataStore; private set
+    lateinit var updater: AppUpdater; private set
 
     /** Last crash, if any, for Settings to display. */
     fun lastCrash(): String? =
@@ -122,6 +124,7 @@ class TapperApp : Application() {
         playerSettings = PlayerSettingsStore(this)
         repository.cacheMaxAgeHours = playerSettings.cacheHours
         navHome = NavHomeStore(this)
+        updater = AppUpdater(this)
         movieMetadata = MovieMetadataStore(this, onError = { msg -> logEvent("TMDB", msg) })
 
         Notifications.createChannels(this)
