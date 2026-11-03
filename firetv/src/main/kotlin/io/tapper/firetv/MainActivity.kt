@@ -516,6 +516,33 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // Auto-update: a short while after the app opens (so it doesn't
+            // compete with loading the channel list), look for a newer build
+            // and download it. Only when the setting is on, and at most
+            // every few hours.
+            LaunchedEffect(Unit) {
+                delay(8_000)
+                if (app.updater.autoUpdate && app.updater.dueForCheck()) app.updater.check()
+            }
+
+            // A downloaded update is offered once per build, and never over
+            // fullscreen playback - it waits until the viewer is back at the
+            // channel list or has stopped watching.
+            var offeredBuild by remember { mutableIntStateOf(0) }
+            val readyBuild = app.updater.readyBuild
+            LaunchedEffect(readyBuild, playing != null && playerFullscreen, inBackground) {
+                val b = readyBuild ?: return@LaunchedEffect
+                if (b == offeredBuild || inBackground || (playing != null && playerFullscreen)) return@LaunchedEffect
+                if (isFinishing) return@LaunchedEffect
+                offeredBuild = b
+                android.app.AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Update ready")
+                    .setMessage("Tapper IPTV build $b has been downloaded. Install it now? The app restarts when it finishes.")
+                    .setPositiveButton("Install now") { _, _ -> lifecycleScope.launch { app.updater.install() } }
+                    .setNegativeButton("Later", null)
+                    .show()
+            }
+
             LaunchedEffect(inBackground, playing != null) {
                 if (inBackground && playing != null) {
                     delay(BACKGROUND_PLAYBACK_GRACE_MS)
@@ -866,6 +893,9 @@ class MainActivity : ComponentActivity() {
                             supplementalEpgSources = app.supplementalEpg.all()
                         },
                         appVersion = "v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                        updater = app.updater,
+                        onCheckUpdates = { lifecycleScope.launch { app.updater.check() } },
+                        onInstallUpdate = { lifecycleScope.launch { app.updater.install() } },
                         lastCrash = remember(syncSummary, logRevision) { app.lastCrash() },
                         // lastCrash above is keyed off logRevision - without
                         // bumping it here, clearLastCrash() deletes the file
