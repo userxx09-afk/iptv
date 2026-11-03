@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Lets the app hand a downloaded update to the system installer. The
+         viewer still has to confirm every install on the system's own screen. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Reminders and scheduled recordings both fire at an exact wall-clock
          time; setExactAndAllowWhileIdle silently degrades to an inexact alarm
@@ -74,6 +77,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".data.UpdateInstallReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".reminders.ReminderAlarmReceiver"
