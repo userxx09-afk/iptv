@@ -55,7 +55,7 @@ class AppUpdater(private val context: Context) {
 
     private var readyFile: File? = null
 
-    fun setAutoUpdate(on: Boolean) {
+    fun enableAutoUpdate(on: Boolean) {
         autoUpdate = on
         prefs.edit().putBoolean("auto", on).apply()
     }
