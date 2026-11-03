@@ -67,6 +67,10 @@ fun SettingsScreen(
     onAddSupplementalEpg: (name: String, guideUrl: String, channelIdsCsv: String) -> Unit,
     onRemoveSupplementalEpg: (id: String) -> Unit,
     appVersion: String,
+    /** Auto-update from GitHub releases - see AppUpdater. */
+    updater: io.tapper.firetv.data.AppUpdater,
+    onCheckUpdates: () -> Unit,
+    onInstallUpdate: () -> Unit,
     lastCrash: String?,
     onClearCrash: () -> Unit,
     onCopyCrash: () -> Unit,
@@ -606,6 +610,34 @@ fun SettingsScreen(
                 "Cleared. The next load will fetch fresh from the provider.",
                 style = MaterialTheme.typography.bodyMedium, color = Focus,
             )
+        }
+
+        Spacer(Modifier.height(28.dp))
+        Text("APP UPDATES", style = MaterialTheme.typography.bodyMedium, color = Dim)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Auto-update (default)", updater.autoUpdate) { updater.setAutoUpdate(true) }
+            Chip("Off", !updater.autoUpdate) { updater.setAutoUpdate(false) }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (updater.autoUpdate)
+                "When the app opens it checks GitHub for a newer build (at most every 6 hours), " +
+                    "downloads it, and asks before installing."
+            else "Off: the app never checks by itself. Use Check for updates when you want to.",
+            style = MaterialTheme.typography.bodyMedium, color = Dim,
+        )
+        if (updater.status.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(updater.status, style = MaterialTheme.typography.bodyLarge, color = Ink)
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip(if (updater.busy) "Working..." else "Check for updates", false) {
+                if (!updater.busy) onCheckUpdates()
+            }
+            val ready = updater.readyBuild
+            if (ready != null) Chip("Install build $ready", false, onInstallUpdate)
         }
 
         Spacer(Modifier.height(28.dp))
