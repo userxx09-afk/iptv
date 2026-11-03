@@ -616,8 +616,8 @@ fun SettingsScreen(
         Text("APP UPDATES", style = MaterialTheme.typography.bodyMedium, color = Dim)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip("Auto-update (default)", updater.autoUpdate) { updater.setAutoUpdate(true) }
-            Chip("Off", !updater.autoUpdate) { updater.setAutoUpdate(false) }
+            Chip("Auto-update (default)", updater.autoUpdate) { updater.enableAutoUpdate(true) }
+            Chip("Off", !updater.autoUpdate) { updater.enableAutoUpdate(false) }
         }
         Spacer(Modifier.height(6.dp))
         Text(
