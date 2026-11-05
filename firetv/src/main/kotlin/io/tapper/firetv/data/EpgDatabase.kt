@@ -324,6 +324,36 @@ class EpgDatabase(context: Context) : SQLiteOpenHelper(context, "tapper_epg.db",
         return out
     }
 
+    /**
+     * Everything airing between [from] and [to] on the given guide ids, for
+     * the GarysTV guide grid. Keyed by the (normalised) guide id; each list
+     * is in start order. Queried in chunks to stay under SQLite's limit on
+     * bound parameters.
+     */
+    fun between(sourceId: String, channelIds: Collection<String>, from: Long, to: Long): Map<String, List<Programme>> {
+        val ids = channelIds.map(::normalizeId).filter { it.isNotEmpty() }.distinct()
+        if (ids.isEmpty()) return emptyMap()
+        val out = HashMap<String, MutableList<Programme>>()
+        ids.chunked(200).forEach { chunk ->
+            val marks = chunk.joinToString(",") { "?" }
+            val args = ArrayList<String>(chunk.size + 3)
+            args.add(sourceId); args.addAll(chunk); args.add(from.toString()); args.add(to.toString())
+            readableDatabase.rawQuery(
+                "SELECT ch, start_utc, end_utc, title, descr FROM epg " +
+                    "WHERE source_id = ? AND ch IN ($marks) AND end_utc > ? AND start_utc < ? " +
+                    "ORDER BY start_utc",
+                args.toTypedArray()
+            ).use { c ->
+                while (c.moveToNext()) {
+                    out.getOrPut(c.getString(0)) { ArrayList() }.add(
+                        Programme(c.getString(0), c.getLong(1), c.getLong(2), c.getString(3), c.getString(4))
+                    )
+                }
+            }
+        }
+        return out
+    }
+
     /** Programme title search, restricted to the future and the current show. */
     fun search(sourceId: String, query: String, now: Long, limit: Int = 60): List<Programme> {
         val out = ArrayList<Programme>()

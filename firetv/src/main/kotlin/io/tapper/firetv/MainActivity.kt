@@ -984,6 +984,106 @@ class MainActivity : ComponentActivity() {
                     val resolvedCatalogue = remember(current.catalogue, logoFolderIndex) {
                         current.catalogue.withResolvedLogos(logoFolderIndex)
                     }
+                    // Shared by the Tapper and GarysTV browse screens.
+                    val playFromBrowse: (List<Channel>, Int) -> Unit = { list, i ->
+                        val target = list.getOrNull(i)
+                        if (playing != null && target != null && target.id == playingChannel?.id) {
+                            // Already on in the corner: just enlarge it,
+                            // rather than re-tuning the same stream.
+                            playerFullscreen = true
+                        } else {
+                            startPlayback(
+                                Playing(list, i, resolvedCatalogue.section(ContentKind.LIVE)?.items.orEmpty())
+                            )
+                        }
+                    }
+                    val recordProgramme: (Channel, EpgDatabase.Programme) -> Unit = { ch, p ->
+                        val url = recordableUrl(ch)
+                        if (url != null) {
+                            // "Record now" from a currently-airing entry
+                            // starts from this moment rather than the
+                            // programme's own start, which may already be
+                            // in the past.
+                            val start = if (System.currentTimeMillis() in p.startUtc until p.endUtc)
+                                System.currentTimeMillis() else p.startUtc
+                            app.recordings.schedule(
+                                Recording(
+                                    id = Recording.newId(), sourceId = ch.sourceId, channelId = ch.id,
+                                    channelName = ch.name, streamUrl = url,
+                                    startUtc = start, endUtc = p.endUtc,
+                                )
+                            )
+                            refreshRecordings()
+                        }
+                    }
+                    val recordChannelNow: (Channel) -> Unit = { ch ->
+                        val url = recordableUrl(ch)
+                        if (url != null) {
+                            val now = System.currentTimeMillis()
+                            app.recordings.schedule(
+                                Recording(
+                                    id = Recording.newId(), sourceId = ch.sourceId, channelId = ch.id,
+                                    // No guide entry chosen, so there is no
+                                    // natural end time - three hours is a
+                                    // generous default; RecordingsScreen
+                                    // can stop it early at any point.
+                                    channelName = ch.name, streamUrl = url,
+                                    startUtc = now, endUtc = now + 3 * 60 * 60 * 1000L,
+                                )
+                            )
+                            refreshRecordings()
+                        }
+                    }
+                    val hasReminderFor: (Channel, EpgDatabase.Programme) -> Boolean = { ch, p ->
+                        Reminder.idFor(ch.sourceId, ch.id, p.startUtc) in reminderIds
+                    }
+                    val setReminderFor: (Channel, EpgDatabase.Programme) -> Unit = { ch, p ->
+                        app.reminders.add(
+                            Reminder(
+                                id = Reminder.idFor(ch.sourceId, ch.id, p.startUtc),
+                                sourceId = ch.sourceId, channelId = ch.id, channelName = ch.name,
+                                programmeTitle = p.title, startUtc = p.startUtc,
+                            )
+                        )
+                        refreshReminders()
+                    }
+                    val cancelReminderFor: (Channel, EpgDatabase.Programme) -> Unit = { ch, p ->
+                        app.reminders.remove(Reminder.idFor(ch.sourceId, ch.id, p.startUtc))
+                        refreshReminders()
+                    }
+                    if (io.tapper.firetv.ui.theme.UiSkin.style == io.tapper.firetv.ui.theme.UiStyle.GARYSTV) {
+                        io.tapper.firetv.ui.GarysBrowseScreen(
+                            catalogue = resolvedCatalogue,
+                            favorites = app.favorites,
+                            sourceName = active.name,
+                            nowPlaying = nowPlaying,
+                            epgStatus = loadStatus ?: epgStatus,
+                            epgIdFor = ::epgIdFor,
+                            guideFor = { chans, from, to ->
+                                withContext(Dispatchers.IO) {
+                                    runCatching { app.epgDb.between(active.id, chans.map(::epgIdFor), from, to) }
+                                        .getOrDefault(emptyMap())
+                                }
+                            },
+                            epgRevision = epgOverrideRevision,
+                            lastChannelId = lastChannelId,
+                            recordings = recordingsList,
+                            onPlay = playFromBrowse,
+                            onOpenSeries = { openSeries(it) },
+                            onSearch = { push(Screen.Search) },
+                            onSettings = { onSettingsTapped() },
+                            onOpenRecordings = { refreshRecordings(); push(Screen.Recordings) },
+                            onRecord = recordProgramme,
+                            onRecordChannel = recordChannelNow,
+                            hasReminder = hasReminderFor,
+                            onSetReminder = setReminderFor,
+                            onCancelReminder = cancelReminderFor,
+                            onSelectionChanged = { chId ->
+                                lastChannelId = chId
+                                app.sourceStore.lastChannelId = chId
+                            },
+                        )
+                    } else
                     BrowseScreen(
                         // A no-op when no folder is configured for this
                         // source (see withResolvedLogos) - cheap in the
@@ -998,18 +1098,7 @@ class MainActivity : ComponentActivity() {
                         // takes priority over the guide line while it's active -
                         // both share the one status slot under the source name.
                         epgStatus = loadStatus ?: epgStatus,
-                        onPlay = { list, i ->
-                            val target = list.getOrNull(i)
-                            if (playing != null && target != null && target.id == playingChannel?.id) {
-                                // Already on in the corner: just enlarge it,
-                                // rather than re-tuning the same stream.
-                                playerFullscreen = true
-                            } else {
-                                startPlayback(
-                                    Playing(list, i, resolvedCatalogue.section(ContentKind.LIVE)?.items.orEmpty())
-                                )
-                            }
-                        },
+                        onPlay = playFromBrowse,
                         miniPlayerActive = playing != null && !playerFullscreen,
                         revealChannel = revealChannel,
                         revealToken = revealToken,
@@ -1047,60 +1136,11 @@ class MainActivity : ComponentActivity() {
                         epgIdFor = ::epgIdFor,
                         onSetGuideChannel = { push(Screen.EpgPick(it)) },
                         epgRevision = epgOverrideRevision,
-                        hasReminder = { ch, p ->
-                            Reminder.idFor(ch.sourceId, ch.id, p.startUtc) in reminderIds
-                        },
-                        onSetReminder = { ch, p ->
-                            app.reminders.add(
-                                Reminder(
-                                    id = Reminder.idFor(ch.sourceId, ch.id, p.startUtc),
-                                    sourceId = ch.sourceId, channelId = ch.id, channelName = ch.name,
-                                    programmeTitle = p.title, startUtc = p.startUtc,
-                                )
-                            )
-                            refreshReminders()
-                        },
-                        onCancelReminder = { ch, p ->
-                            app.reminders.remove(Reminder.idFor(ch.sourceId, ch.id, p.startUtc))
-                            refreshReminders()
-                        },
-                        onRecord = { ch, p ->
-                            val url = recordableUrl(ch)
-                            if (url != null) {
-                                // "Record now" from a currently-airing entry
-                                // starts from this moment rather than the
-                                // programme's own start, which may already be
-                                // in the past.
-                                val start = if (System.currentTimeMillis() in p.startUtc until p.endUtc)
-                                    System.currentTimeMillis() else p.startUtc
-                                app.recordings.schedule(
-                                    Recording(
-                                        id = Recording.newId(), sourceId = ch.sourceId, channelId = ch.id,
-                                        channelName = ch.name, streamUrl = url,
-                                        startUtc = start, endUtc = p.endUtc,
-                                    )
-                                )
-                                refreshRecordings()
-                            }
-                        },
-                        onRecordChannel = { ch ->
-                            val url = recordableUrl(ch)
-                            if (url != null) {
-                                val now = System.currentTimeMillis()
-                                app.recordings.schedule(
-                                    Recording(
-                                        id = Recording.newId(), sourceId = ch.sourceId, channelId = ch.id,
-                                        // No guide entry chosen, so there is no
-                                        // natural end time - three hours is a
-                                        // generous default; RecordingsScreen
-                                        // can stop it early at any point.
-                                        channelName = ch.name, streamUrl = url,
-                                        startUtc = now, endUtc = now + 3 * 60 * 60 * 1000L,
-                                    )
-                                )
-                                refreshRecordings()
-                            }
-                        },
+                        hasReminder = hasReminderFor,
+                        onSetReminder = setReminderFor,
+                        onCancelReminder = cancelReminderFor,
+                        onRecord = recordProgramme,
+                        onRecordChannel = recordChannelNow,
                         onOpenRecordings = { refreshRecordings(); push(Screen.Recordings) },
                     )
                     }
