@@ -64,6 +64,7 @@ struct EpisodeListView: View {
     var body: some View {
         ScrollViewReader { proxy in
         List {
+ Group {
             // Poster, synopsis and rating from TMDb above the episodes.
             Section {
                 TitleInfoBlock(name: seriesItem.name, isShow: true)
@@ -129,6 +130,8 @@ struct EpisodeListView: View {
                     .onLongPressGesture(minimumDuration: 0.5) { jumpToTop() }
             }
         }
+ .garysRows()
+}
         .onChange(of: topToken) { _, _ in
             withAnimation(.easeOut(duration: 0.25)) {
                 proxy.scrollTo(Self.topId, anchor: .top)
@@ -136,6 +139,8 @@ struct EpisodeListView: View {
         }
         }
         .navigationTitle(seriesItem.name)
+        .interfaceStyle()
+        .garysTitle(seriesItem.name)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {

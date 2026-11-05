@@ -73,6 +73,7 @@ struct ChannelGuideView: View {
     var body: some View {
         NavigationStack {
             List {
+ Group {
                 Section {
                     HStack(spacing: 14) {
                         if let logo = channel.logoUrl, let url = URL(string: logo) {
@@ -117,7 +118,11 @@ struct ChannelGuideView: View {
                     }
                 }
             }
+ .garysRows()
+}
             .navigationTitle("Guide")
+            .interfaceStyle()
+            .garysTitle("Guide")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -209,6 +214,7 @@ struct GuideSettingsView: View {
 
     var body: some View {
         Form {
+ Group {
             Section {
                 Text(status.text.isEmpty ? "No guide loaded yet." : status.text)
                     .foregroundStyle(.secondary)
@@ -282,7 +288,11 @@ struct GuideSettingsView: View {
                 Text("Layered on top of every source's own guide, for a channel whose provider never carries a schedule for it - Marquee Sports Network is built in. A channel is matched when its name contains the guide's name, or its guide id matches one listed here.")
             }
         }
+ .garysRows()
+}
         .navigationTitle("Program guide")
+        .interfaceStyle()
+        .garysTitle("Program guide")
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadCoverage() }
         .onChange(of: status.isRefreshing) { _, refreshing in

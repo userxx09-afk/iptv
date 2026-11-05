@@ -12,6 +12,7 @@ struct RemindersView: View {
 
     var body: some View {
         Form {
+ Group {
             if !allowed {
                 Section {
                     Text("Notifications are turned off for Tapper, so reminders can't appear.")
@@ -68,7 +69,11 @@ struct RemindersView: View {
                 }
             }
         }
+ .garysRows()
+}
         .navigationTitle("Reminders")
+        .interfaceStyle()
+        .garysTitle("Reminders")
         .navigationBarTitleDisplayMode(.inline)
         .task { allowed = await store.notificationsAllowed() }
         .confirmationDialog("Remove all reminders?", isPresented: $confirmClear, titleVisibility: .visible) {

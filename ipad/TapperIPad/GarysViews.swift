@@ -896,3 +896,69 @@ private struct GLibraryView: View {
         .overlay(RoundedRectangle(cornerRadius: G.rem * 0.8).stroke(G.line))
     }
 }
+
+// MARK: - Player
+
+/// GarysTV's on-screen display while watching live TV: channel line, the
+/// show's title, a red progress bar with its times, the description, and
+/// what's next. Shown in place of the standard info in the GarysTV interface.
+struct GarysPlayerInfo: View {
+    let channel: Channel
+    let now: EpgProgramme?
+    let next: EpgProgramme?
+
+    var body: some View {
+        TimelineView(.everyMinute) { _ in
+            VStack(alignment: .leading, spacing: G.rem * 0.5) {
+                HStack(spacing: G.rem * 0.8) {
+                    GLogo(size: G.rem * 1.8)
+                    Text([channel.number.map { "\($0.intValue)" }, channel.name].compactMap { $0 }.joined(separator: "  "))
+                        .font(G.font(1.1, .semibold))
+                        .foregroundStyle(G.sub)
+                        .lineLimit(1)
+                }
+                Text(now?.title ?? channel.name)
+                    .font(G.font(1.8, .bold))
+                    .lineLimit(1)
+                if let p = now {
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.19))
+                            Capsule().fill(G.red2).frame(width: g.size.width * p.progress(at: G.now))
+                        }
+                    }
+                    .frame(height: G.rem * 0.45)
+                    HStack {
+                        Text(G.time(p.start))
+                        Spacer()
+                        Text(G.time(p.end))
+                    }
+                    .font(G.font(1))
+                    .foregroundStyle(G.muted)
+                    if let d = p.description, !d.isEmpty {
+                        Text(d)
+                            .font(G.font(1.05))
+                            .foregroundStyle(G.desc)
+                            .lineLimit(2)
+                    }
+                } else {
+                    Text("No guide information for this channel.")
+                        .font(G.font(1))
+                        .foregroundStyle(G.muted)
+                }
+                if let n = next {
+                    HStack(spacing: G.rem * 0.6) {
+                        Text("NEXT")
+                            .font(G.font(0.8, .bold))
+                            .padding(.horizontal, G.rem * 0.4)
+                            .background(RoundedRectangle(cornerRadius: G.rem * 0.25).fill(G.red))
+                        Text(n.title).font(G.font(1.05, .semibold)).lineLimit(1)
+                        Text(G.time(n.start)).font(G.font(1)).foregroundStyle(G.muted)
+                    }
+                }
+            }
+            .foregroundStyle(G.text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}

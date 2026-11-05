@@ -28,6 +28,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+ Group {
                 Section {
                     ForEach(sources) { source in
                         Button {
@@ -282,8 +283,11 @@ struct SettingsView: View {
                     }
                 }
             }
+ .garysRows()
+}
             .interfaceStyle()
             .navigationTitle("Settings")
+            .garysTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("Clear all watch history?", isPresented: $confirmClearWatch, titleVisibility: .visible) {
                 Button("Clear", role: .destructive) { WatchStore.shared.clearAll() }

@@ -51,6 +51,8 @@ struct PlayerView: View {
     @State private var resumeAt: Double?
     @State private var resumeToast: String?
     @ObservedObject private var now = EpgNowStore.shared
+    /// Settings > Interface: GarysTV swaps in its own on-screen info.
+    @AppStorage(UiStyle.storageKey) private var uiStyleRaw = UiStyle.tapper.rawValue
 
     @State private var current: Channel
     @State private var controlsVisible = true
@@ -254,6 +256,9 @@ struct PlayerView: View {
                 if playlist.count > 1 {
                     zapButton(systemName: "chevron.down.circle.fill", delta: -1)
                 }
+                if UiStyle(rawValue: uiStyleRaw) == .garysTV {
+                    GarysPlayerInfo(channel: current, now: nowProgramme, next: nextProgramme)
+                } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(current.name)
                         .font(.title3.bold())
@@ -299,6 +304,7 @@ struct PlayerView: View {
                         }
                     }
                 }
+                }
                 Spacer(minLength: 0)
                 if playlist.count > 1 {
                     zapButton(systemName: "chevron.up.circle.fill", delta: 1)
@@ -308,7 +314,7 @@ struct PlayerView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 18)
             .background(
-                LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [.clear, .black.opacity(UiStyle(rawValue: uiStyleRaw) == .garysTV ? 0.87 : 0.75)], startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea()
             )
         }

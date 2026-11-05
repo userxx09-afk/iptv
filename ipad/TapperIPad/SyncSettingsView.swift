@@ -18,6 +18,7 @@ struct SyncSettingsView: View {
 
     var body: some View {
         Form {
+ Group {
             Section {
                 TextField("https://server/remote.php/dav/files/me/Tapper", text: $address)
                     .keyboardType(.URL)
@@ -99,7 +100,11 @@ struct SyncSettingsView: View {
                 Text("How this iPad is named to your other devices. It syncs when the app opens, when you come back to it, and when a film or episode closes. Marking something unwatched, or removing it from Continue, reaches your other devices too. The Fire TV app syncs when it starts, when you return to it, and when something stops playing.")
             }
         }
+ .garysRows()
+}
         .navigationTitle("Sync")
+        .interfaceStyle()
+        .garysTitle("Sync")
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear { SyncDevice.label = deviceName }
     }

@@ -52,6 +52,7 @@ struct SearchView: View {
     var body: some View {
         NavigationStack {
             List {
+ Group {
                 if normalized.count < 2 {
                     Text("Type at least two characters.")
                         .foregroundStyle(.secondary)
@@ -87,6 +88,8 @@ struct SearchView: View {
                     }
                 }
             }
+ .garysRows()
+}
             .searchable(
                 text: $query,
                 placement: .navigationBarDrawer(displayMode: .always),
@@ -95,6 +98,8 @@ struct SearchView: View {
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
             .navigationTitle("Search")
+            .interfaceStyle()
+            .garysTitle("Search")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

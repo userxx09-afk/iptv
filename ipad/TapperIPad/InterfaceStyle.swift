@@ -106,3 +106,47 @@ struct HeaderBrand: View {
         }
     }
 }
+
+/// List and form rows on GarysTV's navy panels. Put it on the content inside
+/// a List or Form (it reaches every row in every section beneath it).
+private struct GarysRowsModifier: ViewModifier {
+    @AppStorage(UiStyle.storageKey) private var styleRaw = UiStyle.tapper.rawValue
+
+    func body(content: Content) -> some View {
+        content.listRowBackground(UiStyle(rawValue: styleRaw) == .garysTV ? GarysPalette.panel : nil)
+    }
+}
+
+/// A sheet's header in the GarysTV interface: the ringed logo, "GarysTV" and
+/// the screen name in GarysTV's spaced capitals, in place of a plain title.
+private struct GarysTitleModifier: ViewModifier {
+    let title: String
+    @AppStorage(UiStyle.storageKey) private var styleRaw = UiStyle.tapper.rawValue
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if UiStyle(rawValue: styleRaw) == .garysTV {
+            content.toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 10) {
+                        GLogo(size: 26)
+                        (Text("Garys") + Text("TV").foregroundColor(GarysPalette.red))
+                            .font(.headline.weight(.heavy))
+                        Text(title.uppercased())
+                            .font(.subheadline.weight(.semibold))
+                            .tracking(1.6)
+                            .foregroundStyle(G.muted)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    func garysRows() -> some View { modifier(GarysRowsModifier()) }
+    func garysTitle(_ title: String) -> some View { modifier(GarysTitleModifier(title: title)) }
+}

@@ -85,6 +85,8 @@ struct AddSourceView: View {
                 .frame(maxWidth: .infinity)
             }
             .navigationTitle("Add an IPTV service")
+            .interfaceStyle()
+            .garysTitle("Add an IPTV service")
             .navigationBarTitleDisplayMode(.inline)
         }
     }
@@ -132,6 +134,7 @@ struct SourceListView: View {
     var body: some View {
         NavigationStack {
             List {
+ Group {
                 ForEach(sources) { source in
                     Button {
                         onSelect(source)
@@ -158,7 +161,11 @@ struct SourceListView: View {
                     }
                 }
             }
+ .garysRows()
+}
             .navigationTitle("Sources")
+            .interfaceStyle()
+            .garysTitle("Sources")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

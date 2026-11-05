@@ -217,6 +217,7 @@ struct MovieDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("Movie")
+        .garysTitle("Movie")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
