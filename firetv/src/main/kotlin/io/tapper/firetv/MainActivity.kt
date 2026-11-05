@@ -970,6 +970,11 @@ class MainActivity : ComponentActivity() {
                         tmdbApiKey = tmdbApiKey,
                         onSetTmdbApiKey = { k -> app.movieMetadata.apiKey = k; tmdbApiKey = k },
                         onClearMovieInfoCache = { app.movieMetadata.clearCache() },
+                        uiStyle = io.tapper.firetv.ui.theme.UiSkin.style,
+                        onSetUiStyle = {
+                            io.tapper.firetv.ui.theme.UiSkin.style = it
+                            app.playerSettings.uiStyle = it
+                        },
                     )
 
                     current is Screen.Browse -> {

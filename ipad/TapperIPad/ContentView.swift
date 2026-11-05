@@ -97,17 +97,13 @@ struct ContentView: View {
                     emptyState
                 }
             }
+            .interfaceStyle()
             .navigationTitle(activeSource.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // The logo beside the source name, top centre.
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 8) {
-                        AppLogoView(size: 28)
-                        Text(activeSource.name)
-                            .font(.headline)
-                            .lineLimit(1)
-                    }
+                    HeaderBrand(title: activeSource.name)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     sourceMenu
@@ -144,6 +140,7 @@ struct ContentView: View {
                 },
                 onClose: { guideChannel = nil }
             )
+            .interfaceStyle()
         }
         .sheet(isPresented: $showSearch) {
             SearchView(
@@ -151,6 +148,7 @@ struct ContentView: View {
                 loader: xtreamLoader,
                 onClose: { showSearch = false }
             )
+            .interfaceStyle()
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(

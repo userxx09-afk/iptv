@@ -123,6 +123,7 @@ class TapperApp : Application() {
         sync = WatchSync(this, watch)
         playerSettings = PlayerSettingsStore(this)
         repository.cacheMaxAgeHours = playerSettings.cacheHours
+        io.tapper.firetv.ui.theme.UiSkin.style = playerSettings.uiStyle
         navHome = NavHomeStore(this)
         updater = AppUpdater(this)
         movieMetadata = MovieMetadataStore(this, onError = { msg -> logEvent("TMDB", msg) })

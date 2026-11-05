@@ -21,6 +21,7 @@ struct SettingsView: View {
     @ObservedObject private var startup = StartupStore.shared
     @State private var resumeLast = StartupStore.shared.resumeLast
     @State private var startTab = StartupStore.shared.startTab
+    @AppStorage(UiStyle.storageKey) private var uiStyleRaw = UiStyle.tapper.rawValue
 
     private let homeNamespaces = ["live", "movie", "series", "playlist"]
 
@@ -208,6 +209,19 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Picker("Interface", selection: $uiStyleRaw) {
+                        ForEach(UiStyle.allCases) { style in
+                            Text(style.label).tag(style.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("Interface")
+                } footer: {
+                    Text((UiStyle(rawValue: uiStyleRaw) ?? .tapper).description + " Changes right away.")
+                }
+
+                Section {
                     Picker("Buffering", selection: $buffer) {
                         ForEach(BufferSize.allCases) { size in
                             Text(size.label).tag(size)
@@ -268,6 +282,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .interfaceStyle()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("Clear all watch history?", isPresented: $confirmClearWatch, titleVisibility: .visible) {

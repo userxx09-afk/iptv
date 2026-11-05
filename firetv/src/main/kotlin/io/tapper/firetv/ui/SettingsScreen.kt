@@ -113,6 +113,9 @@ fun SettingsScreen(
     tmdbApiKey: String,
     onSetTmdbApiKey: (String) -> Unit,
     onClearMovieInfoCache: () -> Unit,
+    /** Settings > Interface: Tapper or GarysTV look. */
+    uiStyle: io.tapper.firetv.ui.theme.UiStyle,
+    onSetUiStyle: (io.tapper.firetv.ui.theme.UiStyle) -> Unit,
 ) {
     BackHandler { onExit() }
     var editing by remember { mutableStateOf<String?>(null) }
@@ -513,6 +516,20 @@ fun SettingsScreen(
                 }
             }
         }
+
+        Spacer(Modifier.height(28.dp))
+        Text("INTERFACE", style = MaterialTheme.typography.bodyMedium, color = Dim)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            io.tapper.firetv.ui.theme.UiStyle.entries.forEach { style ->
+                Chip(style.label, uiStyle == style) { onSetUiStyle(style) }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            uiStyle.description + " Changes right away.",
+            style = MaterialTheme.typography.bodyMedium, color = Dim,
+        )
 
         Spacer(Modifier.height(28.dp))
         Text("PLAYBACK BUFFER", style = MaterialTheme.typography.bodyMedium, color = Dim)

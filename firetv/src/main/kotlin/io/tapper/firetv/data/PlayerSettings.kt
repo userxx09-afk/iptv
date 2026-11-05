@@ -69,6 +69,12 @@ class PlayerSettingsStore(context: Context) {
         get() = prefs.getInt("mute_minutes", DEFAULT_MUTE_MINUTES).coerceIn(1, MAX_MUTE_MINUTES)
         set(v) = prefs.edit().putInt("mute_minutes", v.coerceIn(1, MAX_MUTE_MINUTES)).apply()
 
+    /** Which look the app uses (Settings > Interface). See ui/theme/Theme.kt. */
+    var uiStyle: io.tapper.firetv.ui.theme.UiStyle
+        get() = runCatching { io.tapper.firetv.ui.theme.UiStyle.valueOf(prefs.getString("ui_style", null) ?: "") }
+            .getOrDefault(io.tapper.firetv.ui.theme.UiStyle.TAPPER)
+        set(v) = prefs.edit().putString("ui_style", v.name).apply()
+
     companion object {
         const val DEFAULT_MUTE_MINUTES = 3
         const val MAX_MUTE_MINUTES = 15
