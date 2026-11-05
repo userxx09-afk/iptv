@@ -20,6 +20,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import kotlinx.coroutines.launch
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -190,7 +196,12 @@ fun GarysRecordingsScreen(
                         style = gStyle(1f, color = GMuted), modifier = Modifier.padding(top = rem.dp(1f)),
                     )
                 }
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(rem.dp(0.35f)), modifier = Modifier.weight(1f)) {
+                val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(rem.dp(0.35f)),
+                    modifier = Modifier.weight(1f).holdLeftToTop(listState, first),
+                ) {
                     itemsIndexed(sorted, key = { i, r -> "${r.id}#$i" }) { i, r ->
                         GRecordingRow(
                             title = r.channelName,
@@ -344,3 +355,30 @@ fun GarysPlayerOsd(
 /** The panel colour behind the player's overlays: GarysTV navy, or the original near-black. */
 internal fun overlayPanel(): Color =
     if (io.tapper.firetv.ui.theme.isGarysSkin) Color(0xF00E1A2E) else Color.Black.copy(alpha = 0.80f)
+
+/**
+ * Holding Left on a long list scrolls back to its first row and focuses it -
+ * the same gesture the Tapper lists use. A short press is left alone.
+ */
+@Composable
+internal fun Modifier.holdLeftToTop(
+    state: androidx.compose.foundation.lazy.LazyListState,
+    first: FocusRequester,
+): Modifier {
+    val scope = rememberCoroutineScope()
+    return this.then(Modifier.onKeyEvent { e ->
+        if (e.key != Key.DirectionLeft) return@onKeyEvent false
+        val repeats = e.nativeKeyEvent.repeatCount
+        val toTop = (e.type == KeyEventType.KeyDown && repeats == 1) || endsLongPress(e)
+        if (toTop) {
+            scope.launch {
+                runCatching { state.scrollToItem(0) }
+                repeat(5) {
+                    if (runCatching { first.requestFocus() }.isSuccess) return@launch
+                    kotlinx.coroutines.delay(16)
+                }
+            }
+        }
+        repeats >= 1 || toTop
+    })
+}

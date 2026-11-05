@@ -786,7 +786,11 @@ private fun GGuide(
                             left = { moveTime(false) }, right = { moveTime(true) },
                             ok = { if (rows.isNotEmpty()) onPlay(rows, selRow) },
                             options = { if (rows.isNotEmpty()) onOptions(rows, selRow, selProg) },
-                            page = { d -> moveRow(d * visible) }) }
+                            page = { d -> moveRow(d * visible) },
+                            toTop = {
+                                selRow = 0; top = 0
+                                ws = align(System.currentTimeMillis()); t = System.currentTimeMillis()
+                            }) }
                         .focusable()
                         .pointerInput(rows, visible) {
                             var acc = 0f
@@ -858,7 +862,7 @@ private var heldOk = false
 private fun guideKey(
     e: androidx.compose.ui.input.key.KeyEvent, any: Boolean, selRow: Int,
     up: () -> Unit, down: () -> Unit, left: () -> Unit, right: () -> Unit,
-    ok: () -> Unit, options: () -> Unit, page: (Int) -> Unit,
+    ok: () -> Unit, options: () -> Unit, page: (Int) -> Unit, toTop: () -> Unit,
 ): Boolean {
     val isOk = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
     if (isOk) {
@@ -871,11 +875,23 @@ private fun guideKey(
         return true
     }
     if (e.key == Key.Menu) { if (e.type == KeyEventType.KeyUp) options(); return true }
+    // Left steps back in time; holding it jumps to the first channel, at now
+    // (the same hold-Left-to-top the Tapper lists have).
+    if (e.key == Key.DirectionLeft) {
+        if (e.type == KeyEventType.KeyDown) {
+            when (e.nativeKeyEvent.repeatCount) {
+                0 -> left()
+                1 -> toTop()
+            }
+        } else if (endsLongPress(e)) {
+            toTop()
+        }
+        return true
+    }
     if (e.type != KeyEventType.KeyDown) return false
     return when (e.key) {
         Key.DirectionUp -> if (!any || selRow == 0) false else { up(); true }
         Key.DirectionDown -> { down(); true }
-        Key.DirectionLeft -> { left(); true }
         Key.DirectionRight -> { right(); true }
         Key.PageUp, Key.ChannelUp -> { page(-1); true }
         Key.PageDown, Key.ChannelDown -> { page(1); true }
@@ -1005,7 +1021,12 @@ private fun GLibrary(
                 item { GChip("All", group == null) { group = null } }
                 items(groups) { g -> GChip(g.label, group == g.label) { group = g.label } }
             }
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(r.dp(0.35f)), modifier = Modifier.weight(1f)) {
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(r.dp(0.35f)),
+                modifier = Modifier.weight(1f).holdLeftToTop(listState, first),
+            ) {
                 itemsIndexed(items, key = { _, c -> c.id }) { i, c ->
                     GItemRow(c, Modifier.let { if (i == 0) it.focusRequester(first) else it }, onFocus = { sel = i }) { open(i) }
                 }
