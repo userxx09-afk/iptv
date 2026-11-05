@@ -695,6 +695,39 @@ class MainActivity : ComponentActivity() {
                 // Sports - it looked like the app forgot, but there was
                 // nothing to remember from: it had already been torn down.
                 Box(Modifier.fillMaxSize()) {
+                val garysFramed = io.tapper.firetv.ui.theme.UiSkin.style == io.tapper.firetv.ui.theme.UiStyle.GARYSTV &&
+                    current !is Screen.Browse && current !is Screen.Loading
+                // GarysTV's top bar jumps straight back to the main screen.
+                fun backToBrowse(view: io.tapper.firetv.ui.GView) {
+                    val at = stack.indexOfLast { it is Screen.Browse }
+                    if (at >= 0) stack = stack.take(at + 1)
+                    io.tapper.firetv.ui.GarysNav.view = view
+                }
+                io.tapper.firetv.ui.GarysFrame(
+                    enabled = garysFramed,
+                    crumb = when (current) {
+                        is Screen.Series -> "Shows › " + current.series.name
+                        is Screen.EpgPick -> "Guide › " + current.channel.name
+                        Screen.Search -> "Search"
+                        Screen.AddSource -> "Add a source"
+                        Screen.Settings -> "Settings"
+                        Screen.Recordings -> "My Recordings"
+                        is Screen.Failed -> "Problem"
+                        else -> ""
+                    },
+                    hints = when (current) {
+                        Screen.Search -> listOf("Type" to "Search", "↓" to "Results", "OK" to "Open", "Hold OK" to "Options", "Back" to "Back")
+                        Screen.Recordings -> listOf("↑↓" to "Move", "OK" to "Play / stop", "Back" to "Back")
+                        is Screen.Series -> listOf("↑↓" to "Move", "OK" to "Play", "Hold ←" to "Top", "Back" to "Back")
+                        else -> listOf("↑↓←→" to "Move", "OK" to "Select", "Back" to "Back")
+                    },
+                    recording = recordingsList.any { it.status == io.tapper.firetv.data.RecordingStatus.RECORDING },
+                    onBack = { pop() },
+                    onHome = { backToBrowse(io.tapper.firetv.ui.GView.HOME) },
+                    onGuide = { backToBrowse(io.tapper.firetv.ui.GView.GUIDE) },
+                    onSearch = { if (current !is Screen.Search) push(Screen.Search) },
+                    onMenu = { if (current !is Screen.Settings) onSettingsTapped() },
+                ) {
                 when {
                     current is Screen.Series -> EpisodesScreen(
                         series = current.series,
@@ -1175,6 +1208,7 @@ class MainActivity : ComponentActivity() {
                         onDelete = { r -> app.recordings.remove(r.id); refreshRecordings() },
                         onExit = { pop() },
                     )
+                }
                 }
                 if (p != null) {
                     key(playToken) {

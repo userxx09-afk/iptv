@@ -33,6 +33,9 @@ import io.tapper.firetv.ui.theme.Backdrop
 import io.tapper.firetv.ui.theme.Dim
 import io.tapper.firetv.ui.theme.Focus
 import io.tapper.firetv.ui.theme.Ink
+import io.tapper.firetv.ui.theme.OnFill
+import io.tapper.firetv.ui.theme.rowEdge
+import io.tapper.firetv.ui.theme.rowFill
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -783,10 +786,10 @@ private fun SettingField(
     Spacer(Modifier.height(4.dp))
     Box(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.06f))
+            .background(rowFill(rowFocused && !editing, Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.06f)))
             .border(
                 if (rowFocused && !editing) 2.dp else 1.dp,
-                if (rowFocused && !editing) Focus else Focus.copy(alpha = 0.4f),
+                rowEdge(rowFocused && !editing, if (rowFocused && !editing) Focus else Focus.copy(alpha = 0.4f)),
                 RoundedCornerShape(8.dp),
             )
             .focusRequester(rowFocus)
@@ -795,7 +798,7 @@ private fun SettingField(
                 else Modifier.clickable(interactionSource = interaction, indication = null) { editing = true }
             )
             .padding(horizontal = 14.dp, vertical = 12.dp)
-    ) {
+    ) { OnFill(rowFocused && !editing) {
         if (editing) {
             if (value.isEmpty() && hint.isNotEmpty()) {
                 Text(hint, style = MaterialTheme.typography.bodyMedium, color = Dim.copy(alpha = 0.6f),
@@ -825,7 +828,7 @@ private fun SettingField(
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
-    }
+    } }
 }
 
 /** Strips everything after the host: Xtream paths contain credentials. */

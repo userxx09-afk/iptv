@@ -38,6 +38,9 @@ import io.tapper.firetv.ui.theme.Backdrop
 import io.tapper.firetv.ui.theme.Dim
 import io.tapper.firetv.ui.theme.Focus
 import io.tapper.firetv.ui.theme.Ink
+import io.tapper.firetv.ui.theme.OnFill
+import io.tapper.firetv.ui.theme.rowEdge
+import io.tapper.firetv.ui.theme.rowFill
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -553,6 +556,12 @@ fun PlayerScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(48.dp).fillMaxWidth(),
             )
         } else if (overlayLevel == 0 && overlayVisible) {
+            if (io.tapper.firetv.ui.theme.isGarysSkin) GarysPlayerOsd(
+                channel = channel,
+                position = if (foreignChannel != null) "" else "${index + 1} / ${channels.size}",
+                programme = nowPlaying(channel),
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            ) else
             ChannelBadge(
                 channel = channel,
                 // `index` only means something inside `channels` - a channel
@@ -649,7 +658,7 @@ private fun PlayerControls(
     Column(
         modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black.copy(alpha = 0.82f))
+            .background(overlayPanel())
             .padding(horizontal = 28.dp, vertical = 20.dp),
     ) {
         Text(
@@ -736,15 +745,15 @@ private fun ControlButton(label: String, modifier: Modifier = Modifier, onClick:
     Box(
         modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(if (focused) Focus.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.10f))
-            .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent, RoundedCornerShape(10.dp))
+            .background(rowFill(focused, Focus.copy(alpha = 0.30f), Color.White.copy(alpha = 0.10f)))
+            .border(if (focused) 2.dp else 0.dp, rowEdge(focused, if (focused) Focus else Color.Transparent), RoundedCornerShape(10.dp))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
-    ) {
+    ) { OnFill(focused) {
         Text(label, style = MaterialTheme.typography.titleMedium,
             color = if (focused) Ink else Dim, maxLines = 1)
-    }
+    } }
 }
 
 private fun formatPlaybackTime(ms: Long): String {
@@ -852,7 +861,7 @@ private fun GuideOverlay(
     Column(
         modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black.copy(alpha = 0.80f))
+            .background(overlayPanel())
             .padding(vertical = 12.dp),
     ) {
         Text(
@@ -915,7 +924,7 @@ private fun ExpandedGuideOverlay(
                 .width(220.dp)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black.copy(alpha = 0.80f))
+                .background(overlayPanel())
                 .padding(vertical = 16.dp),
         ) {
             Text(
@@ -941,7 +950,7 @@ private fun ExpandedGuideOverlay(
                 .weight(1f)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black.copy(alpha = 0.80f)),
+                .background(overlayPanel()),
         ) {
             if (filteredChannels.isEmpty()) {
                 Text(
@@ -968,7 +977,7 @@ private fun ExpandedGuideOverlay(
                 .weight(1f)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black.copy(alpha = 0.80f))
+                .background(overlayPanel())
                 .padding(20.dp),
         ) {
             if (previewChannel != null) {

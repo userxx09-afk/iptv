@@ -37,6 +37,10 @@ fun ItemMenu(
     actions: List<MenuAction>,
     onDismiss: () -> Unit,
 ) {
+    if (io.tapper.firetv.ui.theme.isGarysSkin) {
+        GarysMenuDialog(title, subtitle, actions, onDismiss)
+        return
+    }
     Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier

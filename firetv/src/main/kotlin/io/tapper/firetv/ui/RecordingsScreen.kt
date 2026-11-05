@@ -49,6 +49,10 @@ fun RecordingsScreen(
     onDelete: (Recording) -> Unit,
     onExit: () -> Unit,
 ) {
+    if (io.tapper.firetv.ui.theme.isGarysSkin) {
+        GarysRecordingsScreen(recordings, onPlay, onStop, onCancel, onDelete, onExit)
+        return
+    }
     BackHandler { onExit() }
     var menuFor by remember { mutableStateOf<Recording?>(null) }
     val fmt = remember { SimpleDateFormat("EEE d MMM, HH:mm", Locale.getDefault()) }

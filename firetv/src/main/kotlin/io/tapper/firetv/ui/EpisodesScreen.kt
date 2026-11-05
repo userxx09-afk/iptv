@@ -35,6 +35,9 @@ import io.tapper.firetv.ui.theme.Backdrop
 import io.tapper.firetv.ui.theme.Dim
 import io.tapper.firetv.ui.theme.Focus
 import io.tapper.firetv.ui.theme.Ink
+import io.tapper.firetv.ui.theme.OnFill
+import io.tapper.firetv.ui.theme.rowEdge
+import io.tapper.firetv.ui.theme.rowFill
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -171,13 +174,13 @@ private fun EpisodeRow(
     Row(
         modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f))
-            .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
+            .background(rowFill(focused, Focus.copy(alpha = 0.18f), Color.White.copy(alpha = 0.04f)))
+            .border(if (focused) 2.dp else 0.dp, rowEdge(focused, if (focused) Focus else Color.Transparent),
                 RoundedCornerShape(8.dp))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-    ) {
+    ) { OnFill(focused) {
         if (episode.logoUrl != null) {
             AsyncImage(model = episode.logoUrl, contentDescription = null,
                 modifier = Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)))
@@ -196,5 +199,5 @@ private fun EpisodeRow(
             Spacer(Modifier.width(12.dp))
         }
         if (watched) Text("watched", style = MaterialTheme.typography.bodyMedium, color = Dim)
-    }
+    } }
 }

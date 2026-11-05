@@ -55,6 +55,9 @@ import io.tapper.firetv.ui.theme.Backdrop
 import io.tapper.firetv.ui.theme.Dim
 import io.tapper.firetv.ui.theme.Focus
 import io.tapper.firetv.ui.theme.Ink
+import io.tapper.firetv.ui.theme.OnFill
+import io.tapper.firetv.ui.theme.rowEdge
+import io.tapper.firetv.ui.theme.rowFill
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -400,8 +403,8 @@ private fun ResultRow(
     Row(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f))
-            .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
+            .background(rowFill(focused, Focus.copy(alpha = 0.18f), Color.White.copy(alpha = 0.04f)))
+            .border(if (focused) 2.dp else 0.dp, rowEdge(focused, if (focused) Focus else Color.Transparent),
                 RoundedCornerShape(8.dp))
             // Same explicit handling as the browse rows: a held D-pad centre on
             // a remote does not reach combinedClickable's onLongClick.
@@ -430,7 +433,7 @@ private fun ResultRow(
             }
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-    ) {
+    ) { OnFill(focused) {
         if (logoUrl != null) {
             AsyncImage(model = logoUrl, contentDescription = null,
                 modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)))
@@ -447,5 +450,5 @@ private fun ResultRow(
             }
         }
         if (favorite) Text("*", style = MaterialTheme.typography.titleMedium, color = Focus)
-    }
+    } }
 }

@@ -80,47 +80,47 @@ import java.util.Calendar
  */
 
 // ---------- palette (GarysTV styles.css) ----------
-private val GBg = Color(0xFF04070D)
-private val GBg2 = Color(0xFF0A1424)
-private val GGlow = Color(0xFF15284A)
-private val GPanel = Color(0xFF0E1A2E)
-private val GPanel2 = Color(0xFF13233D)
-private val GCell = Color(0xFF12213A)
-private val GCellAlt = Color(0xFF0F1C32)
-private val GLine = Color(0xFF22385C)
-private val GText = Color(0xFFEEF3FB)
-private val GMuted = Color(0xFF93A6C4)
-private val GDim = Color(0xFF5D7194)
-private val GSub = Color(0xFFCFE0FF)
-private val GDesc = Color(0xFFC4D1E6)
-private val GFocusBg = Color(0xFFE9F0FB)
-private val GFocusText = Color(0xFF08111F)
-private val GFocusSub = Color(0xFF3B4A63)
-private val GRed = Color(0xFFE4002B)
-private val GRed2 = Color(0xFFFF3355)
-private val GBlue = Color(0xFF2F8CFF)
-private val GYellow = Color(0xFFF5C518)
+internal val GBg = Color(0xFF04070D)
+internal val GBg2 = Color(0xFF0A1424)
+internal val GGlow = Color(0xFF15284A)
+internal val GPanel = Color(0xFF0E1A2E)
+internal val GPanel2 = Color(0xFF13233D)
+internal val GCell = Color(0xFF12213A)
+internal val GCellAlt = Color(0xFF0F1C32)
+internal val GLine = Color(0xFF22385C)
+internal val GText = Color(0xFFEEF3FB)
+internal val GMuted = Color(0xFF93A6C4)
+internal val GDim = Color(0xFF5D7194)
+internal val GSub = Color(0xFFCFE0FF)
+internal val GDesc = Color(0xFFC4D1E6)
+internal val GFocusBg = Color(0xFFE9F0FB)
+internal val GFocusText = Color(0xFF08111F)
+internal val GFocusSub = Color(0xFF3B4A63)
+internal val GRed = Color(0xFFE4002B)
+internal val GRed2 = Color(0xFFFF3355)
+internal val GBlue = Color(0xFF2F8CFF)
+internal val GYellow = Color(0xFFF5C518)
 
 private const val SLOT = 30 * 60_000L
 private const val SPAN = 3 * SLOT
 private fun align(t: Long) = t / SLOT * SLOT
 
 /** GarysTV's rem: clamp(14px, 1.08vw, 24px), expressed in dp. */
-private class Rem(val px: Float) {
+internal class Rem(val px: Float) {
     fun dp(x: Float): Dp = (px * x).dp
     fun sp(x: Float) = (px * x).sp
 }
 
-private val LocalRem = staticCompositionLocalOf { Rem(10.4f) }
+internal val LocalRem = staticCompositionLocalOf { Rem(10.4f) }
 
 @Composable
-private fun rememberRem(): Rem {
+internal fun rememberRem(): Rem {
     val w = LocalConfiguration.current.screenWidthDp
     return remember(w) { Rem((w * 0.0108f).coerceIn(9.5f, 16f)) }
 }
 
 @Composable
-private fun gStyle(size: Float, weight: FontWeight = FontWeight.Normal, color: Color = GText, spacing: Float = 0f): TextStyle {
+internal fun gStyle(size: Float, weight: FontWeight = FontWeight.Normal, color: Color = GText, spacing: Float = 0f): TextStyle {
     val r = LocalRem.current
     return TextStyle(
         fontFamily = FontFamily.SansSerif, fontWeight = weight, fontSize = r.sp(size), color = color,
@@ -128,7 +128,12 @@ private fun gStyle(size: Float, weight: FontWeight = FontWeight.Normal, color: C
     )
 }
 
-private enum class GView { HOME, GUIDE, MOVIES, SHOWS }
+internal enum class GView { HOME, GUIDE, MOVIES, SHOWS }
+
+/** Which GarysTV main screen is showing - kept here so the top bar on every other screen can jump to Home or the Guide. */
+object GarysNav {
+    internal var view by mutableStateOf(GView.HOME)
+}
 
 /** Guide filter: everything, favorites only, or one provider category. */
 private sealed interface GFilter {
@@ -163,7 +168,7 @@ fun GarysBrowseScreen(
     onSelectionChanged: (String) -> Unit,
 ) {
     val rem = rememberRem()
-    var view by rememberSaveable { mutableStateOf(GView.HOME) }
+    var view by GarysNav::view
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     var favRevision by remember { mutableIntStateOf(0) }
@@ -192,7 +197,7 @@ fun GarysBrowseScreen(
             }
         ) {
             GTopBar(
-                view = view,
+                showBack = view != GView.HOME,
                 crumb = when (view) {
                     GView.HOME -> ""
                     GView.GUIDE -> "Guide"
@@ -273,8 +278,8 @@ fun GarysBrowseScreen(
 // ---------------- frame ----------------
 
 @Composable
-private fun GTopBar(
-    view: GView, crumb: String, recording: Boolean, now: Long,
+internal fun GTopBar(
+    showBack: Boolean, crumb: String, recording: Boolean, now: Long,
     onBack: () -> Unit, onHome: () -> Unit, onGuide: () -> Unit, onSearch: () -> Unit, onMenu: () -> Unit,
 ) {
     val r = LocalRem.current
@@ -295,7 +300,7 @@ private fun GTopBar(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(r.dp(0.4f))) {
-            if (view != GView.HOME) GPill("‹ Back", onBack)
+            if (showBack) GPill("‹ Back", onBack)
             GPill("Home", onHome)
             GPill("Guide", onGuide)
             GPill("Search", onSearch)
@@ -330,7 +335,7 @@ private fun GTopBar(
 }
 
 @Composable
-private fun GLogo(size: Dp, ring: Dp) {
+internal fun GLogo(size: Dp, ring: Dp) {
     Image(
         painter = painterResource(R.drawable.garys_logo),
         contentDescription = null,
@@ -340,14 +345,14 @@ private fun GLogo(size: Dp, ring: Dp) {
 }
 
 @Composable
-private fun GDot(color: Color = GRed2) {
+internal fun GDot(color: Color = GRed2) {
     val r = LocalRem.current
     Box(Modifier.size(r.dp(0.7f)).clip(CircleShape).background(color))
 }
 
 /** A top-bar button: GarysTV's `.nav` pill, white when focused. */
 @Composable
-private fun GPill(label: String, onClick: () -> Unit) {
+internal fun GPill(label: String, onClick: () -> Unit) {
     val r = LocalRem.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -364,7 +369,7 @@ private fun GPill(label: String, onClick: () -> Unit) {
 
 /** GarysTV's `.chip`: rounded, red when on, white when focused. */
 @Composable
-private fun GChip(label: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun GChip(label: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val r = LocalRem.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -381,7 +386,7 @@ private fun GChip(label: String, on: Boolean, modifier: Modifier = Modifier, onC
 }
 
 @Composable
-private fun GHints(hints: List<Pair<String, String>>) {
+internal fun GHints(hints: List<Pair<String, String>>) {
     val r = LocalRem.current
     Row(
         Modifier.fillMaxWidth().padding(start = r.dp(1.6f), end = r.dp(1.6f), top = r.dp(0.55f), bottom = r.dp(0.8f)),
@@ -405,7 +410,7 @@ private fun GHints(hints: List<Pair<String, String>>) {
 
 /** Keeps asking for focus until the target is attached (it may not be on the first frame). */
 @Composable
-private fun FocusOnEnter(fr: FocusRequester, key: Any?) {
+internal fun FocusOnEnter(fr: FocusRequester, key: Any?) {
     LaunchedEffect(key) {
         repeat(20) {
             if (runCatching { fr.requestFocus() }.isSuccess) return@LaunchedEffect

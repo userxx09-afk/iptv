@@ -30,6 +30,9 @@ import io.tapper.firetv.ui.theme.Backdrop
 import io.tapper.firetv.ui.theme.Dim
 import io.tapper.firetv.ui.theme.Focus
 import io.tapper.firetv.ui.theme.Ink
+import io.tapper.firetv.ui.theme.OnFill
+import io.tapper.firetv.ui.theme.rowEdge
+import io.tapper.firetv.ui.theme.rowFill
 
 /**
  * Manually points one channel at a guide id.
@@ -157,21 +160,18 @@ private fun GuideRow(id: String, title: String?, active: Boolean, onClick: () ->
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(
-                when {
-                    focused -> Focus.copy(alpha = 0.18f)
-                    active -> Focus.copy(alpha = 0.10f)
-                    else -> Color.White.copy(alpha = 0.04f)
-                }
+                rowFill(focused, Focus.copy(alpha = 0.18f),
+                    if (active) Focus.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.04f))
             )
             .border(
                 if (focused || active) 2.dp else 0.dp,
-                if (focused || active) Focus else Color.Transparent,
+                if (active && !focused) Focus else rowEdge(focused, if (focused) Focus else Color.Transparent),
                 RoundedCornerShape(8.dp),
             )
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-    ) {
+    ) { OnFill(focused) {
         Column(Modifier.weight(1f)) {
             Text(
                 title ?: "No program data right now",
@@ -188,5 +188,5 @@ private fun GuideRow(id: String, title: String?, active: Boolean, onClick: () ->
             Spacer(Modifier.width(12.dp))
             Text("IN USE", style = MaterialTheme.typography.bodyMedium, color = Focus)
         }
-    }
+    } }
 }

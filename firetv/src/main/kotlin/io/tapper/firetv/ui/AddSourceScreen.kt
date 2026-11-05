@@ -24,6 +24,9 @@ import io.tapper.firetv.ui.theme.Backdrop
 import io.tapper.firetv.ui.theme.Dim
 import io.tapper.firetv.ui.theme.Focus
 import io.tapper.firetv.ui.theme.Ink
+import io.tapper.firetv.ui.theme.OnFill
+import io.tapper.firetv.ui.theme.rowEdge
+import io.tapper.firetv.ui.theme.rowFill
 
 /**
  * Add an Xtream account or an M3U playlist.
@@ -143,15 +146,15 @@ private fun ModeChip(label: String, active: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(20.dp))
             .background(
-                if (active || focused) Focus.copy(alpha = if (active) 0.28f else 0.16f)
-                else Color.White.copy(alpha = 0.06f)
+                if (active && !focused && io.tapper.firetv.ui.theme.isGarysSkin) Focus
+                else rowFill(focused || active, Focus.copy(alpha = if (active) 0.28f else 0.16f), Color.White.copy(alpha = 0.06f))
             )
-            .border(1.dp, if (focused || active) Focus else Color.Transparent, RoundedCornerShape(20.dp))
+            .border(1.dp, rowEdge(focused, if (focused || active) Focus else Color.Transparent), RoundedCornerShape(20.dp))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 10.dp),
-    ) {
+    ) { OnFill(focused) {
         Text(label, style = MaterialTheme.typography.bodyLarge, color = if (active || focused) Ink else Dim)
-    }
+    } }
 }
 
 /**
@@ -169,19 +172,18 @@ private fun Button(label: String, enabled: Boolean = true, onClick: () -> Unit) 
             .background(
                 when {
                     !enabled -> Color.White.copy(alpha = 0.05f)
-                    focused -> Focus.copy(alpha = 0.38f)
-                    else -> Focus.copy(alpha = 0.16f)
+                    else -> rowFill(focused, Focus.copy(alpha = 0.38f), Focus.copy(alpha = 0.16f))
                 }
             )
             .border(
                 if (focused && enabled) 2.dp else 1.dp,
-                if (enabled) Focus.copy(alpha = if (focused) 1f else 0.45f) else Color.Transparent,
+                if (enabled) rowEdge(focused, Focus.copy(alpha = if (focused) 1f else 0.45f)) else Color.Transparent,
                 RoundedCornerShape(10.dp),
             )
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
             .padding(horizontal = 28.dp, vertical = 14.dp),
         contentAlignment = Alignment.Center,
-    ) {
+    ) { OnFill(focused && enabled) {
         Text(label, style = MaterialTheme.typography.bodyLarge, color = if (enabled) Ink else Dim)
-    }
+    } }
 }

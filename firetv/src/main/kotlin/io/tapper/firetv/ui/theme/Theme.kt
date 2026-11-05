@@ -3,9 +3,14 @@ package io.tapper.firetv.ui.theme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -47,12 +52,55 @@ private val TapperBackdrop = Color(0xFF0B0E14)
 // previous warm cream, is not easily confused with channel-logo artwork.
 private val TapperFocus = Color(0xFF5BB8F5)
 
+// GarysTV's focus highlight is solid white, so text on a focused row turns dark.
+private val GarysFocusBg = Color(0xFFE9F0FB)
+private val GarysFocusText = Color(0xFF08111F)
+private val GarysFocusSub = Color(0xFF3B4A63)
+private val GarysPanel = Color(0xFF0E1A2E)
+private val GarysLine = Color(0xFF22385C)
+
+/** True for content drawn on GarysTV's white focus highlight (see [OnFill]). */
+val LocalOnLight = compositionLocalOf { false }
+
 // Getters rather than constants: reading UiSkin.style inside composition is
-// what makes a skin change recompose every screen that uses these.
-val Ink: Color get() = if (isGarys) GarysInk else TapperInk
-val Dim: Color get() = if (isGarys) GarysDim else TapperDim
+// what makes a skin change recompose every screen that uses these. Ink and Dim
+// also follow LocalOnLight, so a focused GarysTV row's text turns dark.
+val Ink: Color
+    @Composable @ReadOnlyComposable
+    get() = when {
+        !isGarys -> TapperInk
+        LocalOnLight.current -> GarysFocusText
+        else -> GarysInk
+    }
+val Dim: Color
+    @Composable @ReadOnlyComposable
+    get() = when {
+        !isGarys -> TapperDim
+        LocalOnLight.current -> GarysFocusSub
+        else -> GarysDim
+    }
 val Backdrop: Color get() = if (isGarys) GarysBackdrop else TapperBackdrop
 val Focus: Color get() = if (isGarys) GarysRed else TapperFocus
+
+val isGarysSkin: Boolean get() = isGarys
+
+/**
+ * Background for a focusable row or button. GarysTV: navy panel, solid white
+ * when focused. Tapper: whatever tint the row has always used.
+ */
+fun rowFill(focused: Boolean, tapperFocused: Color, tapperIdle: Color): Color =
+    if (isGarys) (if (focused) GarysFocusBg else GarysPanel)
+    else if (focused) tapperFocused else tapperIdle
+
+/** Outline for the same rows: GarysTV draws a thin line, white when focused. */
+fun rowEdge(focused: Boolean, tapper: Color): Color =
+    if (isGarys) (if (focused) GarysFocusBg else GarysLine) else tapper
+
+/** Wrap a row's content in this so its Ink/Dim text turns dark on the GarysTV highlight. */
+@Composable
+fun OnFill(focused: Boolean, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalOnLight provides (isGarys && focused), content = content)
+}
 
 /**
  * Static instances rather than the variable Archivo TTF: minSdk is 25 to keep
@@ -79,17 +127,35 @@ private fun typographyFor(family: FontFamily) = androidx.compose.material3.Typog
 )
 
 private val tapperTypography = typographyFor(Archivo)
-// GarysTV uses the system UI font (Segoe UI on Windows); Roboto is Android's.
-private val garysTypography = typographyFor(FontFamily.SansSerif)
+
+/**
+ * GarysTV's type scale, in its rem (1.08% of the screen width, as in its
+ * styles.css), with the system UI font (Segoe UI on Windows; Roboto here).
+ */
+private fun garysTypography(rem: Float): androidx.compose.material3.Typography {
+    val f = FontFamily.SansSerif
+    return androidx.compose.material3.Typography(
+        displayLarge = TextStyle(fontFamily = f, fontWeight = FontWeight.ExtraBold, fontSize = (rem * 2.4f).sp),
+        headlineLarge = TextStyle(fontFamily = f, fontWeight = FontWeight.Bold, fontSize = (rem * 1.8f).sp),
+        titleMedium = TextStyle(fontFamily = f, fontWeight = FontWeight.SemiBold, fontSize = (rem * 1.15f).sp),
+        bodyLarge = TextStyle(fontFamily = f, fontWeight = FontWeight.Medium, fontSize = (rem * 1.1f).sp),
+        bodyMedium = TextStyle(fontFamily = f, fontWeight = FontWeight.Normal, fontSize = (rem * 0.95f).sp),
+    )
+}
 
 @Composable
 fun TapperTheme(content: @Composable () -> Unit) {
+    val width = LocalConfiguration.current.screenWidthDp
+    val garys = isGarys
+    val typography = remember(garys, width) {
+        if (garys) garysTypography((width * 0.0108f).coerceIn(9.5f, 16f)) else tapperTypography
+    }
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Focus, background = Backdrop, surface = Backdrop,
             onBackground = Ink, onSurface = Ink,
         ),
-        typography = if (isGarys) garysTypography else tapperTypography,
+        typography = typography,
         content = content,
     )
 }

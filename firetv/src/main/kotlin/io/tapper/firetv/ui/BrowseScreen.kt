@@ -1616,6 +1616,10 @@ private fun SourceHeader(source: TvSource, epgStatus: String?, onClick: () -> Un
 
 @Composable
 internal fun Chip(label: String, active: Boolean, onClick: () -> Unit) {
+    if (io.tapper.firetv.ui.theme.isGarysSkin) {
+        CompositionLocalProvider(LocalRem provides rememberRem()) { GChip(label, active, onClick = onClick) }
+        return
+    }
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Box(
