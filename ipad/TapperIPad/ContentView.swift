@@ -41,6 +41,10 @@ struct ContentView: View {
     /// applies to that one load, never to a source the user switches to.
     @State private var launchResumePending = false
 
+    /// Settings > Interface. GarysTV replaces the channel lists with the
+    /// GarysTV screens (GarysViews.swift).
+    @AppStorage(UiStyle.storageKey) private var uiStyleRaw = UiStyle.tapper.rawValue
+
     /// Whatever row was tapped in a live/movie/episode list - drives the
     /// full-screen player. A series row never sets this directly (it has no
     /// stream of its own); only EpisodeListView's rows and this view's own
@@ -89,7 +93,9 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if !playlistLoader.channels.isEmpty {
+                if UiStyle(rawValue: uiStyleRaw) == .garysTV && hasContent {
+                    garysRoot
+                } else if !playlistLoader.channels.isEmpty {
                     channelList(playlistLoader.channels, namespace: "playlist")
                 } else if xtreamLoader.isLoggedIn {
                     xtreamTabs
@@ -98,6 +104,8 @@ struct ContentView: View {
                 }
             }
             .interfaceStyle()
+            // The GarysTV screens draw their own top bar.
+            .toolbar(UiStyle(rawValue: uiStyleRaw) == .garysTV && hasContent ? .hidden : .automatic, for: .navigationBar)
             .navigationTitle(activeSource.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -610,6 +618,31 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var garysRoot: some View {
+        let isPlaylist = !playlistLoader.channels.isEmpty
+        return GarysRootView(
+            sourceName: activeSource.name,
+            live: isPlaylist ? playlistLoader.channels : xtreamLoader.liveChannels,
+            movies: isPlaylist ? [] : xtreamLoader.movies,
+            series: isPlaylist ? [] : xtreamLoader.series,
+            onPlay: { channel, live, list in
+                if live {
+                    StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: channel.id)
+                }
+                play(channel, live: live, list: list)
+            },
+            onSchedule: { guideChannel = $0 },
+            onSearch: { showSearch = true },
+            onSettings: { showSettings = true },
+            movieDestination: { channel in
+                AnyView(MovieDetailView(channel: channel, onPlay: { play($0, live: false) }).interfaceStyle())
+            },
+            seriesDestination: { channel in
+                AnyView(EpisodeListView(loader: xtreamLoader, seriesItem: channel).interfaceStyle())
+            }
+        )
     }
 
     private func channelList(_ channels: [Channel], namespace: String) -> some View {

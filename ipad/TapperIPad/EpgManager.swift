@@ -448,6 +448,20 @@ final class EpgManager {
         }.value
     }
 
+    /// One channel's programmes between two times (epoch seconds), for the
+    /// GarysTV guide grid. Same key matching as schedule(for:).
+    func grid(for channel: Channel, from: Int, to: Int) async -> [EpgProgramme] {
+        guard let id = source?.id else { return [] }
+        let keys = EpgNowStore.shared.candidateKeys(for: channel)
+        return await Task.detached(priority: .userInitiated) {
+            for key in keys {
+                let rows = EpgDatabase.shared.between(id, channelId: key, from: from, to: to)
+                if !rows.isEmpty { return rows }
+            }
+            return []
+        }.value
+    }
+
     /// Programme-title search across the guide, with the channels they air on.
     func searchProgrammes(_ query: String) async -> [ProgrammeHit] {
         guard let id = source?.id else { return [] }

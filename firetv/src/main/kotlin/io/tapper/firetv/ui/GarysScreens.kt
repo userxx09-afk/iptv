@@ -466,12 +466,13 @@ private fun GHome(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val tileH = (maxHeight * 0.30f).coerceIn(r.dp(8f), r.dp(17f))
+        val logoSize = (maxHeight * 0.12f).coerceIn(r.dp(4.5f), r.dp(7f))
         Column(
             Modifier.fillMaxSize().padding(bottom = maxHeight * 0.04f),
             verticalArrangement = Arrangement.spacedBy(r.dp(2f), Alignment.CenterVertically),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(r.dp(1.6f))) {
-                GLogo((maxHeight * 0.12f).coerceIn(r.dp(4.5f), r.dp(7f)), 3.dp)
+                GLogo(logoSize, 3.dp)
                 Text(
                     buildAnnotatedString {
                         append("$greet. ")

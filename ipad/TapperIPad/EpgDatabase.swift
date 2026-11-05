@@ -189,6 +189,14 @@ final class EpgDatabase: @unchecked Sendable {
         ) { Self.programme($0) }
     }
 
+    /// Everything on one channel between two times, for the GarysTV guide grid.
+    func between(_ sourceId: String, channelId: String, from: Int, to: Int) -> [EpgProgramme] {
+        select(
+            "SELECT ch, start_utc, end_utc, title, descr FROM epg WHERE source_id = ? AND ch = ? AND end_utc > ? AND start_utc < ? ORDER BY start_utc",
+            [.text(sourceId), .text(Self.normalizeId(channelId)), .int(from), .int(to)]
+        ) { Self.programme($0) }
+    }
+
     /// Programme-title search, restricted to what is airing now or later.
     func search(_ sourceId: String, query: String, now: Int, limit: Int = 60) -> [EpgProgramme] {
         select(
