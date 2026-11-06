@@ -127,6 +127,9 @@ struct GarysRootView: View {
     let live: [Channel]
     let movies: [Channel]
     let series: [Channel]
+    /// True for an Xtream source: Movies and Shows are offered even while
+    /// they are still loading (they arrive after the live channels).
+    let hasVod: Bool
     let onPlay: (Channel, Bool, [Channel]) -> Void
     let onSchedule: (Channel) -> Void
     let onSearch: () -> Void
@@ -154,7 +157,7 @@ struct GarysRootView: View {
                 case .home:
                     GHomeView(
                         sourceName: sourceName, live: live,
-                        hasMovies: !movies.isEmpty, hasShows: !series.isEmpty,
+                        hasMovies: hasVod || !movies.isEmpty, hasShows: hasVod || !series.isEmpty,
                         onGo: { screen = $0 },
                         onPlay: onPlay, onSchedule: onSchedule,
                         onSearch: onSearch, onSettings: onSettings
@@ -196,6 +199,12 @@ struct GarysRootView: View {
                 }
                 Button("Home") { screen = .home }.buttonStyle(GPillStyle())
                 Button("Guide") { screen = .guide }.buttonStyle(GPillStyle())
+                if hasVod || !movies.isEmpty {
+                    Button("Movies") { screen = .movies }.buttonStyle(GPillStyle())
+                }
+                if hasVod || !series.isEmpty {
+                    Button("Shows") { screen = .shows }.buttonStyle(GPillStyle())
+                }
                 Button("Search", action: onSearch).buttonStyle(GPillStyle())
                 Button("☰ Menu", action: onSettings).buttonStyle(GPillStyle())
             }
@@ -887,7 +896,7 @@ private struct GLibraryView: View {
                 .padding(.top, G.rem * 0.4)
                 Spacer(minLength: 0)
             } else {
-                Text("Nothing here yet.").font(G.font(1.1)).foregroundStyle(G.muted)
+                Text("Still loading, or this source has no \(title.lowercased()).").font(G.font(1.1)).foregroundStyle(G.muted)
             }
         }
         .padding(.horizontal, G.rem * 1.6)

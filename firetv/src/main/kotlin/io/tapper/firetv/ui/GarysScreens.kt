@@ -177,8 +177,9 @@ fun GarysBrowseScreen(
     BackHandler(enabled = view != GView.HOME) { view = GView.HOME }
 
     val live = remember(catalogue) { catalogue.section(ContentKind.LIVE)?.items.orEmpty() }
-    val hasMovies = catalogue.section(ContentKind.MOVIE)?.items?.isNotEmpty() == true
-    val hasShows = catalogue.section(ContentKind.SERIES)?.items?.isNotEmpty() == true
+    val kinds = catalogue.availableKinds
+    val hasMovies = ContentKind.MOVIE in kinds
+    val hasShows = ContentKind.SERIES in kinds
 
     fun toggleFavorite(ch: Channel) { favorites.toggle(ch.sourceId, ch.id); favRevision++ }
     fun isFav(ch: Channel) = favorites.isFavorite(ch.sourceId, ch.id)
@@ -211,6 +212,8 @@ fun GarysBrowseScreen(
                 onGuide = { view = GView.GUIDE },
                 onSearch = onSearch,
                 onMenu = onSettings,
+                onMovies = if (hasMovies) ({ view = GView.MOVIES }) else null,
+                onShows = if (hasShows) ({ view = GView.SHOWS }) else null,
             )
             Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = rem.dp(1.6f))) {
                 when (view) {
@@ -259,6 +262,9 @@ fun GarysBrowseScreen(
                     GView.MOVIES, GView.SHOWS -> GLibrary(
                         kind = if (view == GView.MOVIES) ContentKind.MOVIE else ContentKind.SERIES,
                         section = catalogue.section(if (view == GView.MOVIES) ContentKind.MOVIE else ContentKind.SERIES),
+                        emptyText = catalogue.sectionErrors[if (view == GView.MOVIES) ContentKind.MOVIE else ContentKind.SERIES]
+                            ?: epgStatus?.takeIf { it.startsWith("Loading") }
+                            ?: "This source has no ${if (view == GView.MOVIES) "movies" else "shows"}.",
                         onPlay = onPlay, onOpenSeries = onOpenSeries,
                     )
                 }
@@ -281,6 +287,7 @@ fun GarysBrowseScreen(
 internal fun GTopBar(
     showBack: Boolean, crumb: String, recording: Boolean, now: Long,
     onBack: () -> Unit, onHome: () -> Unit, onGuide: () -> Unit, onSearch: () -> Unit, onMenu: () -> Unit,
+    onMovies: (() -> Unit)? = null, onShows: (() -> Unit)? = null,
 ) {
     val r = LocalRem.current
     val ctx = LocalContext.current
@@ -303,6 +310,8 @@ internal fun GTopBar(
             if (showBack) GPill("‹ Back", onBack)
             GPill("Home", onHome)
             GPill("Guide", onGuide)
+            onMovies?.let { GPill("Movies", it) }
+            onShows?.let { GPill("Shows", it) }
             GPill("Search", onSearch)
             GPill("☰ Menu", onMenu)
         }
@@ -976,7 +985,7 @@ private fun GProgCell(
         Text(
             label,
             style = gStyle(1.1f, if (filler) FontWeight.Normal else FontWeight.SemiBold,
-                if (focused) GFocusText else if (filler) GDim else GText),
+                if (focused) GFocusText else if (filler) GMuted else GText),
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         if (sub.isNotEmpty() && w > r.dp(9f)) {
@@ -991,6 +1000,7 @@ private fun GProgCell(
 private fun GLibrary(
     kind: ContentKind,
     section: PlaylistRepository.Section?,
+    emptyText: String,
     onPlay: (List<Channel>, Int) -> Unit,
     onOpenSeries: (Channel) -> Unit,
 ) {
@@ -1040,7 +1050,7 @@ private fun GLibrary(
             verticalArrangement = Arrangement.spacedBy(r.dp(0.7f)),
         ) {
             if (c == null) {
-                Text("Nothing here yet.", style = gStyle(1.1f, color = GMuted))
+                Text(emptyText, style = gStyle(1.1f, color = GMuted))
             } else {
                 if (!c.logoUrl.isNullOrBlank()) {
                     AsyncImage(

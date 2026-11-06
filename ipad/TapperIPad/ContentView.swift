@@ -627,6 +627,7 @@ struct ContentView: View {
             live: isPlaylist ? playlistLoader.channels : xtreamLoader.liveChannels,
             movies: isPlaylist ? [] : xtreamLoader.movies,
             series: isPlaylist ? [] : xtreamLoader.series,
+            hasVod: !isPlaylist,
             onPlay: { channel, live, list in
                 if live {
                     StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: channel.id)
