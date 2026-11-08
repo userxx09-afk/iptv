@@ -214,6 +214,19 @@ struct GarysRootView: View {
         .background { GarysPalette.backdrop }
         .preferredColorScheme(.dark)
         .tint(G.red2)
+        .onAppear {
+            // Diagnostic: the guide grid loads a logo per row (the Tapper
+            // screens show none). If those come from the same server as the
+            // streams, that's worth knowing when streams struggle.
+            func hosts(_ urls: [String?]) -> String {
+                let set = Set(urls.compactMap { $0.flatMap { URL(string: $0)?.host } })
+                return set.isEmpty ? "none" : set.sorted().prefix(4).joined(separator: ", ")
+            }
+            AppLog.shared.log(
+                "GARYS",
+                "logo hosts: \(hosts(live.prefix(500).map { $0.logoUrl })); stream hosts: \(hosts(live.prefix(500).map { $0.streams.first?.url }))"
+            )
+        }
     }
 
     private var topBar: some View {

@@ -91,6 +91,7 @@ final class TapperPlayer: ObservableObject {
     private var itemStatusObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
     private var failureObserver: NSObjectProtocol?
+    private var errorLogObserver: NSObjectProtocol?
     private var networkToken: UUID?
 
     /// Mutes for `minutes`, or - when already muted - brings the sound back.
@@ -289,7 +290,47 @@ final class TapperPlayer: ObservableObject {
             }
         }
 
+        // Every request AVPlayer couldn't complete (playlist refresh, segment,
+        // key), as it happens - the HTTP status and which server, so a -1008
+        // or a stall can be traced to what actually came back.
+        errorLogObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemNewErrorLogEntry,
+            object: item,
+            queue: .main
+        ) { _ in
+            guard let e = item.errorLog()?.events.last else { return }
+            AppLog.shared.log(
+                "HLS",
+                "request failed: status \(e.errorStatusCode) \(e.errorDomain) on \(Self.redact(e.uri)) via \(e.serverAddress ?? "?")\(e.errorComment.map { " - \($0)" } ?? "")"
+            )
+        }
+
+        AppLog.shared.log("HLS", "opening \(Self.redact(stream.url))")
         avPlayer.play()
+    }
+
+    /// Host plus the last path part only: Xtream URLs carry the account's
+    /// username and password in the path, which must not end up in a log
+    /// the viewer may share.
+    nonisolated static func redact(_ uri: String?) -> String {
+        guard let uri, let u = URL(string: uri) else { return "?" }
+        let host = u.host ?? "?"
+        let port = u.port.map { ":\($0)" } ?? ""
+        return "\(host)\(port)/…/\(u.lastPathComponent)"
+    }
+
+    /// One line summing up the current item's network history, written when
+    /// playback stalls or fails.
+    private func logTransfer(_ reason: String) {
+        guard let item = player?.currentItem else { return }
+        if let a = item.accessLog()?.events.last {
+            AppLog.shared.log(
+                "HLS",
+                "\(reason): server \(a.serverAddress ?? "?") (changed \(a.numberOfServerAddressChanges)x), uri \(Self.redact(a.uri)), requests \(a.numberOfMediaRequests), stalls \(a.numberOfStalls), observed \(Int(a.observedBitrate / 1000)) kbps, indicated \(Int(a.indicatedBitrate / 1000)) kbps, dropped frames \(a.numberOfDroppedVideoFrames)"
+            )
+        } else {
+            AppLog.shared.log("HLS", "\(reason): no access log yet")
+        }
     }
 
     // MARK: - Audio
@@ -526,6 +567,7 @@ final class TapperPlayer: ObservableObject {
     /// times (a frozen connection usually just needs reopening), then move
     /// on to an alternate feed, then explain.
     private func recover(channel: Channel) {
+        logTransfer("stalled")
         if stallRestarts < maxStallRestarts, channel.streams.indices.contains(attempt) {
             stallRestarts += 1
             statusNote = "Reconnecting..."
@@ -556,6 +598,8 @@ final class TapperPlayer: ObservableObject {
         failedItem = item
 
         let (httpStatus, socketError) = classify(error: error)
+        AppLog.shared.log("HLS", "failed: \(error.map { "\($0.domain) \($0.code)" } ?? "no error") http \(httpStatus.map(String.init) ?? "-")")
+        logTransfer("at failure")
 
         // No connection at all: nothing to try until one returns. The network
         // monitor restarts playback the moment it does.
@@ -685,6 +729,10 @@ final class TapperPlayer: ObservableObject {
             NotificationCenter.default.removeObserver(failureObserver)
         }
         failureObserver = nil
+        if let errorLogObserver {
+            NotificationCenter.default.removeObserver(errorLogObserver)
+        }
+        errorLogObserver = nil
     }
 
     func release() {
