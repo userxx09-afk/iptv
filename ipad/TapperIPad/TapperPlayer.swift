@@ -43,7 +43,7 @@ final class TapperPlayer: ObservableObject {
     // transient connection drop rather than a real failure - see
     // handleFailure's own comment for why this exists.
     private var transientRetries = 0
-    private let maxTransientRetries = 2
+    private let maxTransientRetries = 3
 
     /// Same-feed restarts after the picture froze (reset once playback has
     /// been healthy for a while).
@@ -255,10 +255,10 @@ final class TapperPlayer: ObservableObject {
                     self.isBuffering = false
                     self.renderedFrames = true
                     self.logAudio(for: observedItem)
-                    // A later stall in this same playback session gets its
-                    // own fresh retry budget rather than inheriting however
-                    // many of these were already spent getting here.
-                    self.transientRetries = 0
+                    // transientRetries is NOT reset here: a stream that
+                    // reopens fine and then fails again seconds later would
+                    // otherwise retry forever. monitorTick resets it after
+                    // 30s of healthy playback instead.
                     // A film or episode restarted after a drop goes back to
                     // where it was rather than to the beginning.
                     if let target = self.pendingResume {
@@ -479,6 +479,7 @@ final class TapperPlayer: ObservableObject {
             if let since = movingSince, now.timeIntervalSince(since) > 30 {
                 stallRestarts = 0
                 networkRetries = 0
+                transientRetries = 0
             }
             if statusNote != nil { statusNote = nil }
             return
@@ -624,11 +625,27 @@ final class TapperPlayer: ObservableObject {
            let status = underlying.userInfo["AVErrorHTTPStatusCodeKey"] as? Int {
             return (status, false)
         }
+        // -1008 (resource unavailable), -1014 (zero-byte resource) and -1011
+        // (bad server response) are what AVPlayer reports when a live HLS
+        // playlist refresh or segment fetch comes back empty mid-stream -
+        // typically an Xtream panel's short-lived tokenised redirect expiring
+        // about a minute in. Reopening the original .m3u8 URL gets a fresh
+        // token, so these are retried like a dropped connection instead of
+        // going straight to the error screen.
         let socketCodes: Set<Int> = [
             NSURLErrorTimedOut, NSURLErrorCannotConnectToHost,
             NSURLErrorNetworkConnectionLost, NSURLErrorNotConnectedToInternet,
             NSURLErrorDNSLookupFailed,
+            NSURLErrorResourceUnavailable, NSURLErrorZeroByteResource,
+            NSURLErrorBadServerResponse,
         ]
+        if error.domain == NSURLErrorDomain, socketCodes.contains(error.code) {
+            return (nil, true)
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError,
+           underlying.domain == NSURLErrorDomain, socketCodes.contains(underlying.code) {
+            return (nil, true)
+        }
         return (nil, socketCodes.contains(error.code))
     }
 
