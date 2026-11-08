@@ -264,6 +264,11 @@ struct ContentView: View {
             // Catch up with the other devices as soon as the app opens.
             await SyncManager.shared.syncIfStale(seconds: 0)
         }
+        // The GarysTV screens stay alive under the player; hold their
+        // once-a-minute guide refresh until it closes (GarysGuideClock).
+        .onChange(of: playingChannel == nil) { _, closed in
+            GarysGuideClock.shared.paused = !closed
+        }
         .fullScreenCover(item: $playingChannel) { channel in
             PlayerView(
                 channel: channel,

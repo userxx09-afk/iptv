@@ -1,5 +1,40 @@
+import Combine
 import SwiftUI
 import TapperCore
+
+/// What the GarysTV screens watch instead of EpgNowStore directly. It passes
+/// the once-a-minute "on now" refresh through only while no channel is
+/// playing. The screens stay alive under the full-screen player, and from
+/// build 1146 on, every refresh made them redo work behind the video (Home's
+/// "On now" strip scanning every channel, every guide row re-querying the
+/// database) - right as live streams started failing about once a minute.
+/// While paused, one refresh is remembered and delivered on close.
+final class GarysGuideClock: ObservableObject {
+    static let shared = GarysGuideClock()
+
+    @Published private(set) var revision = 0
+    private var pending = false
+    private var sub: AnyCancellable?
+
+    var paused = false {
+        didSet {
+            if !paused, pending {
+                pending = false
+                revision &+= 1
+            }
+        }
+    }
+
+    private init() {
+        sub = EpgNowStore.shared.$revision
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                if self.paused { self.pending = true } else { self.revision &+= 1 }
+            }
+    }
+}
 
 // The GarysTV interface (Settings > Interface > GarysTV): the GarysTV DVR's
 // screens rebuilt for the iPad - its top bar, Home tiles, DISH-style guide
@@ -247,7 +282,9 @@ private struct GHomeView: View {
     let onSettings: () -> Void
 
     @ObservedObject private var favorites = FavoritesStore.shared
-    @ObservedObject private var epgNow = EpgNowStore.shared
+    // Re-renders on the gated clock; programmes are read from EpgNowStore.
+    @ObservedObject private var clock = GarysGuideClock.shared
+    private var epgNow: EpgNowStore { EpgNowStore.shared }
 
     private struct Tile: Identifiable {
         let id: String
@@ -322,7 +359,9 @@ private struct GHomeView: View {
                         }
                     }
 
-                    let onNow = live.filter { epgNow.programme(for: $0) != nil }.prefix(12)
+                    // lazy: stop at the first 12 matches rather than checking
+                    // the guide for every channel in the line-up.
+                    let onNow = Array(live.lazy.filter { epgNow.programme(for: $0) != nil }.prefix(12))
                     strip("On now") {
                         if onNow.isEmpty {
                             Text("Once the guide has loaded, what's on now shows up here.")
@@ -687,7 +726,7 @@ private struct GGuideRow: View {
     let onSchedule: () -> Void
 
     @State private var programmes: [EpgProgramme] = []
-    @ObservedObject private var epgNow = EpgNowStore.shared
+    @ObservedObject private var clock = GarysGuideClock.shared
 
     var body: some View {
         HStack(spacing: 0) {
@@ -719,7 +758,7 @@ private struct GGuideRow: View {
         .frame(height: rowH)
         .overlay(alignment: .bottom) { Rectangle().fill(G.bg).frame(height: 2) }
         .contextMenu { GChannelMenu(channel: channel, onPlay: onPlay, onSchedule: onSchedule) }
-        .task(id: "\(ws)|\(epgNow.revision)") {
+        .task(id: "\(ws)|\(clock.revision)") {
             programmes = await EpgManager.shared.grid(for: channel, from: ws, to: ws + G.span)
         }
     }
