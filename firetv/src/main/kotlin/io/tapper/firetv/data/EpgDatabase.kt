@@ -340,6 +340,25 @@ class EpgDatabase(context: Context) : SQLiteOpenHelper(context, "tapper_epg.db",
         return out
     }
 
+    /**
+     * Every listing that starts in [fromUtc, toUtc), grouped by guide channel id: what My Teams
+     * looks through for a game (see TeamsScreen). Uses the epg_window index.
+     */
+    fun startingBetween(sourceId: String, fromUtc: Long, toUtc: Long): Map<String, List<Programme>> {
+        val out = HashMap<String, MutableList<Programme>>()
+        readableDatabase.rawQuery(
+            "SELECT ch, start_utc, end_utc, title, descr FROM epg " +
+                "WHERE source_id = ? AND start_utc >= ? AND start_utc < ?",
+            arrayOf(sourceId, fromUtc.toString(), toUtc.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.getOrPut(c.getString(0)) { ArrayList() }
+                    .add(Programme(c.getString(0), c.getLong(1), c.getLong(2), c.getString(3), c.getString(4)))
+            }
+        }
+        return out
+    }
+
     fun prune(cutoffUtc: Long) {
         writableDatabase.delete("epg", "end_utc < ?", arrayOf(cutoffUtc.toString()))
     }

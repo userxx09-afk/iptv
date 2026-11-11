@@ -58,6 +58,10 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.kotlinx.serialization.json)
         }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+        }
         androidMain.dependencies {
             implementation(libs.coroutines.android)
             // OkHttp-backed engine. Chosen over Ktor's other JVM engines

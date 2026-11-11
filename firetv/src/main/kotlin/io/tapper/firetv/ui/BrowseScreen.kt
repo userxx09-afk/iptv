@@ -232,6 +232,7 @@ fun BrowseScreen(
     /** Ad-hoc "record now" for a channel with no specific guide entry chosen. */
     onRecordChannel: (Channel) -> Unit,
     onOpenRecordings: () -> Unit,
+    onOpenTeams: () -> Unit = {},
     /** Bumped whenever a manual override changes. The focused channel's
      *  schedule is loaded once per focus change (see the LaunchedEffect
      *  below), so without this an override set from this same channel's menu
@@ -1352,6 +1353,13 @@ fun BrowseScreen(
                             title = "Recordings", subtitle = "", selected = false,
                             onFocused = { navPreview = NavPreview.NONE },
                             onClick = onOpenRecordings, onLongPress = {},
+                        )
+                    }
+                    item {
+                        RailRow(
+                            title = "My Teams", subtitle = "", selected = false,
+                            onFocused = { navPreview = NavPreview.NONE },
+                            onClick = onOpenTeams, onLongPress = {},
                         )
                     }
                     item {
