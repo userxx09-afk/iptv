@@ -10,10 +10,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Releases go to the prod repo with PROD_REPO_TOKEN, so this workflow's own
-# token only needs to read the source.
+# Releases go to the prod repo with PROD_REPO_TOKEN. Write access here is only
+# for the transition release below, while this repo is still public.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apk:
@@ -116,3 +116,16 @@ jobs:
             Always the newest Tapper IPTV build. Install link for Downloader:
             https://github.com/userxx09-afk/prod/releases/download/iptv-latest/tapper-iptv.apk
           files: dist/tapper-iptv.apk
+
+      # Transition only: installs from before the move check this repo's own
+      # latest release. While the repo is public, keep publishing here so they
+      # get the update that points them at prod. Skipped once it's private.
+      - name: Publish here too (while this repo is public)
+        if: github.event.repository.private != true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Tapper IPTV build ${{ github.run_number }}
+          body: |
+            Newer builds are at https://github.com/userxx09-afk/prod/releases/download/iptv-latest/tapper-iptv.apk
+          files: dist/tapper-iptv-*.apk
