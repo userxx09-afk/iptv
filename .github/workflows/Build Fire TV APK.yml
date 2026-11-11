@@ -10,10 +10,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Required to publish a release. The default GITHUB_TOKEN is read-only on
-# repositories created after early 2023, and publishing 403s without this.
+# Releases go to the prod repo with PROD_REPO_TOKEN, so this workflow's own
+# token only needs to read the source.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   apk:
@@ -81,14 +81,38 @@ jobs:
           path: dist/*.apk
           retention-days: 30
 
-      # Artifacts need a signed-in session to download, which Downloader on
-      # Fire TV cannot provide. A release asset on a public repo is a plain URL.
-      - name: Publish release
+      # The source repo is private, so installable builds go to the public
+      # releases-only "prod" repo, which every Tapper app publishes to.
+      # PROD_REPO_TOKEN: a fine-grained token with Contents: read and write on
+      # userxx09-afk/prod only (README, "Release pipeline").
+      - name: Publish build to prod
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
+          repository: userxx09-afk/prod
+          token: ${{ secrets.PROD_REPO_TOKEN }}
+          target_commitish: main
+          tag_name: iptv-build-${{ github.run_number }}
           name: Tapper IPTV build ${{ github.run_number }}
+          make_latest: false
           body: |
-            Release APK for sideloading to Fire TV or an Android tablet.
-            Built from ${{ github.sha }}.
+            Tapper IPTV for Fire TV / Android, build ${{ github.run_number }}.
           files: dist/*.apk
+
+      # A fixed address for the Downloader app, always pointing at the newest
+      # build: https://github.com/userxx09-afk/prod/releases/download/iptv-latest/tapper-iptv.apk
+      - name: Refresh the "latest" install link
+        run: cp dist/*.apk dist/tapper-iptv.apk
+      - name: Publish latest link to prod
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: userxx09-afk/prod
+          token: ${{ secrets.PROD_REPO_TOKEN }}
+          target_commitish: main
+          tag_name: iptv-latest
+          name: Tapper IPTV (latest)
+          make_latest: false
+          overwrite_files: true
+          body: |
+            Always the newest Tapper IPTV build. Install link for Downloader:
+            https://github.com/userxx09-afk/prod/releases/download/iptv-latest/tapper-iptv.apk
+          files: dist/tapper-iptv.apk

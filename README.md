@@ -81,3 +81,23 @@ buttons explain that they aren't set up.
 4. Copy the Application (client) ID into the secret.
 
 Push to `main` (or re-run the workflows) after adding the secrets.
+
+## Release pipeline
+
+The source repo is private. Every CI build publishes its installable APK to
+the public, releases-only repo **userxx09-afk/prod**, which hosts the final
+builds of all the Tapper apps:
+
+- `iptv-build-N` - one release per build (the in-app updater reads these)
+- `iptv-latest` - always the newest build, at a fixed address for Downloader:
+  `https://github.com/userxx09-afk/prod/releases/download/iptv-latest/tapper-iptv.apk`
+
+Repository secrets this needs:
+
+| Secret | What |
+| --- | --- |
+| `PROD_REPO_TOKEN` | Fine-grained token, repository access *only* `prod`, permission Contents: Read and write |
+| `RELEASE_KEYSTORE_BASE64`, `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD` | The private signing key. Keep an offline copy: a lost key means reinstalling on every device again |
+
+Builds are R8-obfuscated release builds; the R8 mapping for each build is a
+CI artifact (`r8-mapping-N`) for reading crash stack traces.
