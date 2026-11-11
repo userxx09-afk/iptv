@@ -49,6 +49,7 @@ import io.tapper.firetv.ui.EpgPickerScreen
 import io.tapper.firetv.ui.EpisodesScreen
 import io.tapper.firetv.ui.FailureScreen
 import io.tapper.firetv.ui.RecordingsScreen
+import io.tapper.firetv.ui.TeamsScreen
 import io.tapper.firetv.ui.SettingsScreen
 import io.tapper.firetv.ui.LoadingScreen
 import io.tapper.firetv.ui.PlayerScreen
@@ -82,6 +83,7 @@ class MainActivity : ComponentActivity() {
         data class Series(val series: Channel) : Screen
         data class EpgPick(val channel: Channel) : Screen
         data object Recordings : Screen
+        data object Teams : Screen
     }
 
     // allLiveChannels feeds the in-player guide's category browsing
@@ -1097,8 +1099,55 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onOpenRecordings = { refreshRecordings(); push(Screen.Recordings) },
+                        onOpenTeams = { push(Screen.Teams) },
                     )
                     }
+
+                    current is Screen.Teams && catalogue != null -> TeamsScreen(
+                        store = app.teams,
+                        sports = app.sports,
+                        channels = catalogue.channels,
+                        epgIdFor = ::epgIdFor,
+                        listingsBetween = { from, to -> app.epgDb.startingBetween(active.id, from, to) },
+                        onWatch = { ch -> startPlayback(Playing(listOf(ch), 0)); pop() },
+                        onRemind = { ch, g, m ->
+                            // The guide's listing when there is one (its start is what the
+                            // reminder alarm fires on), otherwise the game's own start.
+                            val start = m.listing?.startUtc ?: g.startUtc
+                            app.reminders.add(
+                                Reminder(
+                                    id = Reminder.idFor(ch.sourceId, ch.id, start),
+                                    sourceId = ch.sourceId, channelId = ch.id, channelName = ch.name,
+                                    programmeTitle = m.listing?.title ?: "${g.league.label}: ${g.title}",
+                                    startUtc = start,
+                                )
+                            )
+                            refreshReminders()
+                            Toast.makeText(this@MainActivity, "Reminder set for ${g.title} on ${ch.name}", Toast.LENGTH_LONG).show()
+                        },
+                        onRecord = { ch, g, m ->
+                            val url = recordableUrl(ch)
+                            if (url == null) {
+                                Toast.makeText(this@MainActivity, "${ch.name} can't be recorded", Toast.LENGTH_LONG).show()
+                            } else {
+                                // Games run long: from a few minutes early until an hour
+                                // after the listing (or the usual length) ends.
+                                val now = System.currentTimeMillis()
+                                val start = maxOf(now, (m.listing?.startUtc ?: g.startUtc) - 5 * 60_000)
+                                val end = maxOf(m.listing?.endUtc ?: 0L, g.endGuessUtc) + 60 * 60_000
+                                app.recordings.schedule(
+                                    Recording(
+                                        id = Recording.newId(), sourceId = ch.sourceId, channelId = ch.id,
+                                        channelName = ch.name, streamUrl = url, startUtc = start, endUtc = end,
+                                    )
+                                )
+                                refreshRecordings()
+                                Toast.makeText(this@MainActivity, "Will record ${g.title} on ${ch.name}, with an hour extra", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        onExit = { pop() },
+                    )
+
 
                     current is Screen.Recordings -> RecordingsScreen(
                         recordings = recordingsList,

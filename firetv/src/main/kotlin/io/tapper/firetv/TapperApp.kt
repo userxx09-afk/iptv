@@ -10,6 +10,7 @@ import java.util.Locale
 import io.tapper.firetv.data.AppUpdater
 import io.tapper.firetv.data.CredentialVault
 import io.tapper.firetv.data.EpgDatabase
+import io.tapper.firetv.data.TeamsStore
 import io.tapper.firetv.data.EpgOverrideStore
 import io.tapper.firetv.data.EpgRefreshWorker
 import io.tapper.firetv.data.EpgRepository
@@ -43,6 +44,9 @@ class TapperApp : Application() {
     lateinit var navHome: NavHomeStore; private set
     lateinit var movieMetadata: MovieMetadataStore; private set
     lateinit var updater: AppUpdater; private set
+    lateinit var teams: TeamsStore; private set
+    /** My Teams' schedules (ESPN), kept in memory for the life of the app. */
+    val sports by lazy { io.tapper.core.sports.SportsClient() }
 
     /** Last crash, if any, for Settings to display. */
     fun lastCrash(): String? =
@@ -124,6 +128,7 @@ class TapperApp : Application() {
         playerSettings = PlayerSettingsStore(this)
         repository.cacheMaxAgeHours = playerSettings.cacheHours
         navHome = NavHomeStore(this)
+        teams = TeamsStore(this)
         updater = AppUpdater(this)
         movieMetadata = MovieMetadataStore(this, onError = { msg -> logEvent("TMDB", msg) })
 
