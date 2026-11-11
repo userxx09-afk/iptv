@@ -38,17 +38,41 @@ jobs:
       # Cloud sync sign-in (Settings > Shared watch history). Optional: without
       # these secrets the build still succeeds and the sign-in buttons say
       # they aren't set up. See README, "Cloud sync setup".
-      - name: Build debug APK
+      # Optional private signing key. Without these secrets the build is
+      # signed with the committed debug key, exactly as before.
+      - name: Restore release keystore
         env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build release APK (shrunk and obfuscated)
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
           MICROSOFT_OAUTH_CLIENT_ID: ${{ secrets.MICROSOFT_OAUTH_CLIENT_ID }}
-        run: gradle :firetv:assembleDebug --no-daemon --stacktrace
+        run: gradle :firetv:assembleRelease --no-daemon --stacktrace
 
       - name: Stage APK
         run: |
           mkdir -p dist
-          cp firetv/build/outputs/apk/debug/*.apk dist/tapper-iptv-${{ github.run_number }}.apk
+          cp firetv/build/outputs/apk/release/*.apk dist/tapper-iptv-${{ github.run_number }}.apk
+
+      # R8's name map, needed to read a crash stack trace from the obfuscated
+      # build. Not attached to the release. (On a public repo, any signed-in
+      # GitHub user can download Actions artifacts - another reason to go private.)
+      - name: Upload R8 mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: r8-mapping-${{ github.run_number }}
+          path: firetv/build/outputs/mapping/release/mapping.txt
+          retention-days: 90
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -65,6 +89,6 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: Tapper IPTV build ${{ github.run_number }}
           body: |
-            Debug-signed APK for sideloading to Fire TV or an Android tablet.
+            Release APK for sideloading to Fire TV or an Android tablet.
             Built from ${{ github.sha }}.
           files: dist/*.apk

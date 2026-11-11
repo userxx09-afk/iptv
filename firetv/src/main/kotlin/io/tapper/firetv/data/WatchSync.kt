@@ -20,6 +20,7 @@ class WatchSync(
     companion object {
         private const val PREFIX = "tapper-watch-"
         private const val PREFS = "tapper_sync"
+        private const val WEBDAV_VAULT = "sync-webdav"
     }
 
     private val prefs get() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -55,14 +56,28 @@ class WatchSync(
     }
 
     fun saveWebDav(url: String, user: String?, pass: String?) {
+        // The password goes to the encrypted vault; earlier builds kept it in
+        // these plain preferences, readable from a backup or a rooted device.
+        if (pass.isNullOrEmpty()) vault.delete(WEBDAV_VAULT) else vault.put(WEBDAV_VAULT, user.orEmpty(), pass)
         prefs.edit().putString("kind", Config.Kind.WEBDAV.name)
-            .putString("dav", url).putString("user", user).putString("pass", pass).apply()
+            .putString("dav", url).putString("user", user).remove("pass").apply()
+    }
+
+    /** The WebDAV password, moving one left in plain preferences into the vault. */
+    private fun webDavPassword(): String? {
+        prefs.getString("pass", null)?.let { legacy ->
+            vault.put(WEBDAV_VAULT, prefs.getString("user", null).orEmpty(), legacy)
+            prefs.edit().remove("pass").apply()
+            return legacy
+        }
+        return vault.get(WEBDAV_VAULT)?.second
     }
 
     /** Turning sync off also signs out of any cloud account. */
     fun disable() {
         CloudProvider.entries.forEach { vault.delete(vaultKey(it)) }
-        prefs.edit().putString("kind", Config.Kind.NONE.name).remove("cloud_account").apply()
+        vault.delete(WEBDAV_VAULT)
+        prefs.edit().putString("kind", Config.Kind.NONE.name).remove("cloud_account").remove("pass").apply()
     }
 
     /** Step one of cloud sign-in: the code to show. Blocking network call. */
@@ -102,7 +117,7 @@ class WatchSync(
         return when (c.kind) {
             Config.Kind.FOLDER -> c.folderUri?.let { SafBackend(context, Uri.parse(it)) }
             Config.Kind.WEBDAV -> c.webdavUrl?.let {
-                WebDavBackend(it, c.username, prefs.getString("pass", null))
+                WebDavBackend(it, c.username, webDavPassword())
             }
             Config.Kind.GOOGLE -> cloudSession(CloudProvider.GOOGLE)?.let { GoogleDriveBackend(it) }
             Config.Kind.MICROSOFT -> cloudSession(CloudProvider.MICROSOFT)?.let { OneDriveBackend(it) }
