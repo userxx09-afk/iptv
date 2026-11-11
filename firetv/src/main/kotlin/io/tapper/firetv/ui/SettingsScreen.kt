@@ -25,6 +25,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.tapper.core.model.ContentKind
 import io.tapper.firetv.data.BufferSize
+import io.tapper.firetv.data.CloudProvider
+import io.tapper.firetv.data.CloudSignInState
 import io.tapper.firetv.data.NavHomeStore
 import io.tapper.firetv.data.PlaylistRepository
 import io.tapper.firetv.data.SupplementalEpgSource
@@ -97,6 +99,10 @@ fun SettingsScreen(
     onSaveWebDav: (String, String, String) -> Unit,
     onSyncNow: () -> Unit,
     onDisableSync: () -> Unit,
+    /** Non-null while a Google / Microsoft sign-in is showing its code. */
+    cloudSignIn: CloudSignInState?,
+    onCloudSignIn: (CloudProvider) -> Unit,
+    onCancelCloudSignIn: () -> Unit,
     onExit: () -> Unit,
     /** Null when Settings is reached without ever having loaded a source
      *  successfully (see the failure-screen route this screen also serves) -
@@ -555,6 +561,19 @@ fun SettingsScreen(
             style = MaterialTheme.typography.bodyMedium, color = Dim,
         )
         Spacer(Modifier.height(10.dp))
+        // Signing in creates the sync folder in the account by itself - the
+        // easy option on Fire TV, which usually has no Drive or OneDrive
+        // provider for "Choose folder" to offer.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Sign in with Google", cloudSignIn?.provider == CloudProvider.GOOGLE) {
+                onCloudSignIn(CloudProvider.GOOGLE)
+            }
+            Chip("Sign in with Microsoft", cloudSignIn?.provider == CloudProvider.MICROSOFT) {
+                onCloudSignIn(CloudProvider.MICROSOFT)
+            }
+        }
+        cloudSignIn?.let { st -> CloudSignInPanel(st, onCancelCloudSignIn) }
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // Drive, OneDrive and Dropbox all appear in the system folder
             // picker when their app is installed - no separate sign-in here.
@@ -697,6 +716,53 @@ fun SettingsScreen(
                 categories.map { c -> MenuAction(c) { onSetNavHome(k, g.key, c); navHomeRevision++ } },
             onDismiss = { homeCountryPicking = null },
         )
+    }
+}
+
+/** The code-and-address card shown while the user signs in on another device. */
+@Composable
+private fun CloudSignInPanel(st: CloudSignInState, onCancel: () -> Unit) {
+    Spacer(Modifier.height(12.dp))
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, Dim, RoundedCornerShape(10.dp))
+            .padding(18.dp)
+    ) {
+        when {
+            st.error != null -> {
+                Text(st.error, style = MaterialTheme.typography.bodyLarge, color = Ink)
+                Spacer(Modifier.height(10.dp))
+                Chip("Close", false, onCancel)
+            }
+            st.userCode == null -> {
+                Text("Contacting ${st.provider.company}...",
+                    style = MaterialTheme.typography.bodyLarge, color = Ink)
+                Spacer(Modifier.height(10.dp))
+                Chip("Cancel", false, onCancel)
+            }
+            else -> {
+                Text("On your phone or computer, go to",
+                    style = MaterialTheme.typography.bodyMedium, color = Dim)
+                Text(st.verificationUrl.orEmpty().removePrefix("https://"),
+                    style = MaterialTheme.typography.headlineLarge, color = Ink)
+                Spacer(Modifier.height(8.dp))
+                Text("and enter this code",
+                    style = MaterialTheme.typography.bodyMedium, color = Dim)
+                Text(st.userCode.orEmpty(),
+                    style = MaterialTheme.typography.displayLarge, color = Focus)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Waiting for you to finish signing in to ${st.provider.company}. " +
+                        "A \"Tapper IPTV\" sync folder is created in your ${st.provider.label} " +
+                        "automatically - sign in with the same account on your other devices.",
+                    style = MaterialTheme.typography.bodyMedium, color = Dim,
+                )
+                Spacer(Modifier.height(10.dp))
+                Chip("Cancel", false, onCancel)
+            }
+        }
     }
 }
 

@@ -3,6 +3,17 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+/**
+ * OAuth client IDs for "Sign in with Google / Microsoft" under Shared watch
+ * history. Read from environment variables (CI passes them from repository
+ * secrets - see the workflow) or from ~/.gradle/gradle.properties for a local
+ * build. Left empty, the app still builds; the sign-in buttons just explain
+ * that cloud sign-in isn't set up. Setup steps: README, "Cloud sync setup".
+ */
+fun oauthSetting(name: String): String =
+    (System.getenv(name)?.takeIf { it.isNotBlank() } ?: project.findProperty(name)?.toString() ?: "")
+        .trim().replace("\"", "")
+
 android {
     namespace = "io.tapper.firetv"
 
@@ -42,7 +53,10 @@ android {
         // to the constant.
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 33
         // Bump this by hand when features change.
-        versionName = "0.15.0"
+        versionName = "0.16.0"
+        buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${oauthSetting("GOOGLE_OAUTH_CLIENT_ID")}\"")
+        buildConfigField("String", "GOOGLE_OAUTH_CLIENT_SECRET", "\"${oauthSetting("GOOGLE_OAUTH_CLIENT_SECRET")}\"")
+        buildConfigField("String", "MICROSOFT_OAUTH_CLIENT_ID", "\"${oauthSetting("MICROSOFT_OAUTH_CLIENT_ID")}\"")
     }
     buildTypes {
         release {

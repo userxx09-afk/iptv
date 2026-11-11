@@ -35,7 +35,14 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      # Cloud sync sign-in (Settings > Shared watch history). Optional: without
+      # these secrets the build still succeeds and the sign-in buttons say
+      # they aren't set up. See README, "Cloud sync setup".
       - name: Build debug APK
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          MICROSOFT_OAUTH_CLIENT_ID: ${{ secrets.MICROSOFT_OAUTH_CLIENT_ID }}
         run: gradle :firetv:assembleDebug --no-daemon --stacktrace
 
       - name: Stage APK

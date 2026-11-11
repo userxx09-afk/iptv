@@ -29,8 +29,10 @@ class WatchSync(
         val folderUri: String? = null,
         val webdavUrl: String? = null,
         val username: String? = null,
+        /** The signed-in Google or Microsoft account, for GOOGLE / MICROSOFT. */
+        val account: String? = null,
     ) {
-        enum class Kind { NONE, FOLDER, WEBDAV }
+        enum class Kind { NONE, FOLDER, WEBDAV, GOOGLE, MICROSOFT }
     }
 
     fun config(): Config = Config(
@@ -39,7 +41,13 @@ class WatchSync(
         folderUri = prefs.getString("folder", null),
         webdavUrl = prefs.getString("dav", null),
         username = prefs.getString("user", null),
+        account = prefs.getString("cloud_account", null),
     )
+
+    // Refresh tokens are as good as a password to the account, so they go to
+    // the keystore-backed vault rather than these plain preferences.
+    private val vault by lazy { CredentialVault(context) }
+    private fun vaultKey(p: CloudProvider) = "sync-cloud-" + p.name.lowercase()
 
     fun saveFolder(uri: Uri) {
         prefs.edit().putString("kind", Config.Kind.FOLDER.name)
@@ -51,7 +59,43 @@ class WatchSync(
             .putString("dav", url).putString("user", user).putString("pass", pass).apply()
     }
 
-    fun disable() = prefs.edit().putString("kind", Config.Kind.NONE.name).apply()
+    /** Turning sync off also signs out of any cloud account. */
+    fun disable() {
+        CloudProvider.entries.forEach { vault.delete(vaultKey(it)) }
+        prefs.edit().putString("kind", Config.Kind.NONE.name).remove("cloud_account").apply()
+    }
+
+    /** Step one of cloud sign-in: the code to show. Blocking network call. */
+    fun startCloudSignIn(p: CloudProvider): CloudAuth.DeviceCode = CloudAuth.start(p)
+
+    /**
+     * Step two: waits for the user to finish on their other device, then
+     * creates the sync folder in their Drive / OneDrive and switches sync over
+     * to it. Returns the account name.
+     */
+    suspend fun finishCloudSignIn(code: CloudAuth.DeviceCode): String = withContext(Dispatchers.IO) {
+        val tokens = CloudAuth.await(code)
+        val refresh = tokens.refreshToken
+            ?: throw CloudAuthException("${code.provider.company} didn't allow offline access. Try signing in again.")
+        val p = code.provider
+        val account = CloudAuth.accountName(p, tokens.accessToken)
+        vault.put(vaultKey(p), account, refresh)
+        val session = CloudSession(p, account, refresh) { vault.put(vaultKey(p), account, it) }
+        when (p) {
+            CloudProvider.GOOGLE -> GoogleDriveBackend(session).ensureFolder()
+            CloudProvider.MICROSOFT -> OneDriveBackend(session).ensureFolder()
+        }
+        prefs.edit()
+            .putString("kind", if (p == CloudProvider.GOOGLE) Config.Kind.GOOGLE.name else Config.Kind.MICROSOFT.name)
+            .putString("cloud_account", account)
+            .apply()
+        account
+    }
+
+    private fun cloudSession(p: CloudProvider): CloudSession? {
+        val (account, refresh) = vault.get(vaultKey(p)) ?: return null
+        return CloudSession(p, account, refresh) { vault.put(vaultKey(p), account, it) }
+    }
 
     private fun backend(): SyncBackend? {
         val c = config()
@@ -60,6 +104,8 @@ class WatchSync(
             Config.Kind.WEBDAV -> c.webdavUrl?.let {
                 WebDavBackend(it, c.username, prefs.getString("pass", null))
             }
+            Config.Kind.GOOGLE -> cloudSession(CloudProvider.GOOGLE)?.let { GoogleDriveBackend(it) }
+            Config.Kind.MICROSOFT -> cloudSession(CloudProvider.MICROSOFT)?.let { OneDriveBackend(it) }
             Config.Kind.NONE -> null
         }
     }
@@ -70,7 +116,11 @@ class WatchSync(
 
     suspend fun sync(): kotlin.Result<Result> = withContext(Dispatchers.IO) {
         runCatching {
-            val b = backend() ?: error("Sync isn't set up yet.")
+            val b = backend() ?: error(
+                if (config().kind == Config.Kind.GOOGLE || config().kind == Config.Kind.MICROSOFT)
+                    "The cloud sign-in is missing. Sign in again in Settings."
+                else "Sync isn't set up yet."
+            )
             val me = WatchStore.deviceId(context)
             val mine = PREFIX + me + ".json"
 
