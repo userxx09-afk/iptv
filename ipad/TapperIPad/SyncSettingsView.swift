@@ -165,7 +165,8 @@ struct SyncSettingsView: View {
                 .disabled(sync.syncing)
                 Button("Sign out", role: .destructive) { turnOff() }
             } else {
-                ForEach(CloudProvider.allCases) { p in
+                // Microsoft only once this build has its client ID (OneDrive set-up was shelved).
+                ForEach(CloudProvider.allCases.filter { $0 == .google || $0.isConfigured }) { p in
                     Button {
                         startSignIn(p)
                     } label: {
@@ -180,7 +181,7 @@ struct SyncSettingsView: View {
             if let p = cloudProvider, configured {
                 Text("Watch history is kept in \(p.folderDescription) in your \(p.label). Sign the Fire TV app in to the same account (Settings > Shared watch history) to share it.")
             } else {
-                Text("The easiest way to share watch history. Sign in and a sync folder is created in your Google Drive or OneDrive automatically - nothing to set up. The app can only see the files it creates there. Sign your Fire TV in to the same account.")
+                Text("The easiest way to share watch history. Sign in and a sync folder is created in your Google Drive automatically - nothing to set up. The app can only see the files it creates there. Sign your Fire TV in to the same account.")
             }
         }
     }

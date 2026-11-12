@@ -3,6 +3,14 @@ name: Build Fire TV APK
 on:
   push:
     branches: [main]
+    # Only when something this build uses changed: the repo is private, so
+    # every run counts against the Actions minutes (macOS at 10x).
+    paths:
+      - firetv/**
+      - shared/**
+      - gradle/**
+      - '*.gradle.kts'
+      - '.github/workflows/Build Fire TV APK.yml'
   workflow_dispatch:
 
 # A new push cancels the previous run rather than queueing another build.

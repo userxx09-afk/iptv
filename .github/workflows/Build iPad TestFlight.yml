@@ -3,6 +3,14 @@ name: Build iPad TestFlight
 on:
   push:
     branches: [main]
+    # Only when something this build uses changed: the repo is private, so
+    # every run counts against the Actions minutes (macOS at 10x).
+    paths:
+      - ipad/**
+      - shared/**
+      - gradle/**
+      - '*.gradle.kts'
+      - '.github/workflows/Build iPad TestFlight.yml'
   workflow_dispatch:
 
 # A new push cancels the previous run rather than queueing another build,

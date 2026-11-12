@@ -568,8 +568,11 @@ fun SettingsScreen(
             Chip("Sign in with Google", cloudSignIn?.provider == CloudProvider.GOOGLE) {
                 onCloudSignIn(CloudProvider.GOOGLE)
             }
-            Chip("Sign in with Microsoft", cloudSignIn?.provider == CloudProvider.MICROSOFT) {
-                onCloudSignIn(CloudProvider.MICROSOFT)
+            // Only offered once this build has a Microsoft client ID (OneDrive set-up was shelved).
+            if (CloudProvider.MICROSOFT.isConfigured) {
+                Chip("Sign in with Microsoft", cloudSignIn?.provider == CloudProvider.MICROSOFT) {
+                    onCloudSignIn(CloudProvider.MICROSOFT)
+                }
             }
         }
         cloudSignIn?.let { st -> CloudSignInPanel(st, onCancelCloudSignIn) }
