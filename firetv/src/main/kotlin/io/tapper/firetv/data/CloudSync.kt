@@ -58,7 +58,7 @@ class CloudAuthException(message: String) : Exception(message)
 
 // MARK: - HTTP
 
-internal object CloudHttp {
+object CloudHttp {
     class Response(val code: Int, val body: String, val location: String?)
 
     fun call(
