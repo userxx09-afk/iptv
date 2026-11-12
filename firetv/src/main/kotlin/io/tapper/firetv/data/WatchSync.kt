@@ -20,6 +20,7 @@ class WatchSync(
     companion object {
         private const val PREFIX = "tapper-watch-"
         private const val PREFS = "tapper_sync"
+        private const val WEBDAV_VAULT = "sync-webdav"
     }
 
     private val prefs get() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -29,8 +30,10 @@ class WatchSync(
         val folderUri: String? = null,
         val webdavUrl: String? = null,
         val username: String? = null,
+        /** The signed-in Google or Microsoft account, for GOOGLE / MICROSOFT. */
+        val account: String? = null,
     ) {
-        enum class Kind { NONE, FOLDER, WEBDAV }
+        enum class Kind { NONE, FOLDER, WEBDAV, GOOGLE, MICROSOFT }
     }
 
     fun config(): Config = Config(
@@ -39,7 +42,13 @@ class WatchSync(
         folderUri = prefs.getString("folder", null),
         webdavUrl = prefs.getString("dav", null),
         username = prefs.getString("user", null),
+        account = prefs.getString("cloud_account", null),
     )
+
+    // Refresh tokens are as good as a password to the account, so they go to
+    // the keystore-backed vault rather than these plain preferences.
+    private val vault by lazy { CredentialVault(context) }
+    private fun vaultKey(p: CloudProvider) = "sync-cloud-" + p.name.lowercase()
 
     fun saveFolder(uri: Uri) {
         prefs.edit().putString("kind", Config.Kind.FOLDER.name)
@@ -47,19 +56,71 @@ class WatchSync(
     }
 
     fun saveWebDav(url: String, user: String?, pass: String?) {
+        // The password goes to the encrypted vault; earlier builds kept it in
+        // these plain preferences, readable from a backup or a rooted device.
+        if (pass.isNullOrEmpty()) vault.delete(WEBDAV_VAULT) else vault.put(WEBDAV_VAULT, user.orEmpty(), pass)
         prefs.edit().putString("kind", Config.Kind.WEBDAV.name)
-            .putString("dav", url).putString("user", user).putString("pass", pass).apply()
+            .putString("dav", url).putString("user", user).remove("pass").apply()
     }
 
-    fun disable() = prefs.edit().putString("kind", Config.Kind.NONE.name).apply()
+    /** The WebDAV password, moving one left in plain preferences into the vault. */
+    private fun webDavPassword(): String? {
+        prefs.getString("pass", null)?.let { legacy ->
+            vault.put(WEBDAV_VAULT, prefs.getString("user", null).orEmpty(), legacy)
+            prefs.edit().remove("pass").apply()
+            return legacy
+        }
+        return vault.get(WEBDAV_VAULT)?.second
+    }
+
+    /** Turning sync off also signs out of any cloud account. */
+    fun disable() {
+        CloudProvider.entries.forEach { vault.delete(vaultKey(it)) }
+        vault.delete(WEBDAV_VAULT)
+        prefs.edit().putString("kind", Config.Kind.NONE.name).remove("cloud_account").remove("pass").apply()
+    }
+
+    /** Step one of cloud sign-in: the code to show. Blocking network call. */
+    fun startCloudSignIn(p: CloudProvider): CloudAuth.DeviceCode = CloudAuth.start(p)
+
+    /**
+     * Step two: waits for the user to finish on their other device, then
+     * creates the sync folder in their Drive / OneDrive and switches sync over
+     * to it. Returns the account name.
+     */
+    suspend fun finishCloudSignIn(code: CloudAuth.DeviceCode): String = withContext(Dispatchers.IO) {
+        val tokens = CloudAuth.await(code)
+        val refresh = tokens.refreshToken
+            ?: throw CloudAuthException("${code.provider.company} didn't allow offline access. Try signing in again.")
+        val p = code.provider
+        val account = CloudAuth.accountName(p, tokens.accessToken)
+        vault.put(vaultKey(p), account, refresh)
+        val session = CloudSession(p, account, refresh) { vault.put(vaultKey(p), account, it) }
+        when (p) {
+            CloudProvider.GOOGLE -> GoogleDriveBackend(session).ensureFolder()
+            CloudProvider.MICROSOFT -> OneDriveBackend(session).ensureFolder()
+        }
+        prefs.edit()
+            .putString("kind", if (p == CloudProvider.GOOGLE) Config.Kind.GOOGLE.name else Config.Kind.MICROSOFT.name)
+            .putString("cloud_account", account)
+            .apply()
+        account
+    }
+
+    private fun cloudSession(p: CloudProvider): CloudSession? {
+        val (account, refresh) = vault.get(vaultKey(p)) ?: return null
+        return CloudSession(p, account, refresh) { vault.put(vaultKey(p), account, it) }
+    }
 
     private fun backend(): SyncBackend? {
         val c = config()
         return when (c.kind) {
             Config.Kind.FOLDER -> c.folderUri?.let { SafBackend(context, Uri.parse(it)) }
             Config.Kind.WEBDAV -> c.webdavUrl?.let {
-                WebDavBackend(it, c.username, prefs.getString("pass", null))
+                WebDavBackend(it, c.username, webDavPassword())
             }
+            Config.Kind.GOOGLE -> cloudSession(CloudProvider.GOOGLE)?.let { GoogleDriveBackend(it) }
+            Config.Kind.MICROSOFT -> cloudSession(CloudProvider.MICROSOFT)?.let { OneDriveBackend(it) }
             Config.Kind.NONE -> null
         }
     }
@@ -70,7 +131,11 @@ class WatchSync(
 
     suspend fun sync(): kotlin.Result<Result> = withContext(Dispatchers.IO) {
         runCatching {
-            val b = backend() ?: error("Sync isn't set up yet.")
+            val b = backend() ?: error(
+                if (config().kind == Config.Kind.GOOGLE || config().kind == Config.Kind.MICROSOFT)
+                    "The cloud sign-in is missing. Sign in again in Settings."
+                else "Sync isn't set up yet."
+            )
             val me = WatchStore.deviceId(context)
             val mine = PREFIX + me + ".json"
 

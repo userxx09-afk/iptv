@@ -21,11 +21,27 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.1.0"
+    MARKETING_VERSION: "2.0.0"
     CURRENT_PROJECT_VERSION: "1"
     # iPad only (device family 2) — this is the iPad app, not a universal
     # iPhone/iPad build. Revisit if that ever changes.
     TARGETED_DEVICE_FAMILY: "2"
+  # Shipped (Release/archive) builds: Swift is already compiled to native
+  # code; these make sure symbol names are stripped from the binary and debug
+  # info goes only to the separate dSYM (never in the uploaded app), so the
+  # shipped app gives away as little of its structure as possible.
+  configs:
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: wholemodule
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      COPY_PHASE_STRIP: "YES"
+      STRIP_INSTALLED_PRODUCT: "YES"
+      STRIP_STYLE: all
+      STRIP_SWIFT_SYMBOLS: "YES"
+      DEPLOYMENT_POSTPROCESSING: "YES"
+      DEAD_CODE_STRIPPING: "YES"
+      ENABLE_TESTABILITY: "NO"
 
 targets:
   TapperIPad:
@@ -38,6 +54,14 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.tapper.ipad
         PRODUCT_NAME: "Tapper IPTV"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # OAuth client IDs for Settings > Sync > "Sign in with Google /
+        # Microsoft". Empty by default; CI fills them from repository secrets
+        # as xcodebuild overrides (see the TestFlight workflow), and they reach
+        # the app through the Info.plist keys below. Same IDs as the Fire TV
+        # build. Setup: README, "Cloud sync setup".
+        GOOGLE_OAUTH_CLIENT_ID: ""
+        GOOGLE_OAUTH_CLIENT_SECRET: ""
+        MICROSOFT_OAUTH_CLIENT_ID: ""
     info:
       path: Generated/Info.plist
       properties:
@@ -104,6 +128,9 @@ targets:
         # exclude media, so no second key is needed here at all.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        TapperGoogleOAuthClientID: "$(GOOGLE_OAUTH_CLIENT_ID)"
+        TapperGoogleOAuthClientSecret: "$(GOOGLE_OAUTH_CLIENT_SECRET)"
+        TapperMicrosoftOAuthClientID: "$(MICROSOFT_OAUTH_CLIENT_ID)"
         NSLocalNetworkUsageDescription: "Tapper connects to your own server or NAS to share watch history with your other devices."
     # Code signing is deliberately NOT configured here. CI passes
     # CODE_SIGN_STYLE/DEVELOPMENT_TEAM/PROVISIONING_PROFILE_SPECIFIER as

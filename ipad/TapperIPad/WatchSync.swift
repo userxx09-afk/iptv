@@ -67,9 +67,19 @@ enum SyncError: LocalizedError {
     }
 }
 
+/// Somewhere shards can be listed, read and written: a WebDAV folder, or a
+/// Google Drive / OneDrive folder (CloudSync.swift).
+protocol SyncStore {
+    func listShards() async throws -> [String]
+    func read(_ name: String) async throws -> Data?
+    func write(_ name: String, _ data: Data) async throws
+    /// Records [name] wherever the store needs it to be found again.
+    func register(_ name: String) async throws
+}
+
 /// Plain GET / PUT against a WebDAV folder with Basic authentication - the
 /// two verbs Fire TV's client uses, so any server that works there works here.
-struct WebDavClient {
+struct WebDavClient: SyncStore {
     private static let indexName = "tapper-index.json"
     private static let prefix = "tapper-watch-"
 
@@ -178,11 +188,36 @@ struct WebDavClient {
 
 // MARK: - Settings
 
-/// Where to sync. The address and user name sit in UserDefaults; the password
-/// is in the Keychain.
+/// Where to sync: a WebDAV folder (address and user name in UserDefaults,
+/// password in the Keychain), or a Google / Microsoft account (refresh token
+/// in the Keychain).
 enum SyncConfig {
+    enum Kind: String { case webdav, google, microsoft }
+
     private static let urlKey = "tapper.sync.url"
+    private static let kindKey = "tapper.sync.kind"
+    private static let accountKey = "tapper.sync.cloudAccount"
     private static let vaultId = "tapper-sync-webdav"
+    private static func cloudVaultId(_ p: CloudProvider) -> String { "tapper-sync-cloud-\(p.rawValue)" }
+
+    /// One session per provider, so access tokens are reused between syncs.
+    private static var sessions: [CloudProvider: CloudSession] = [:]
+
+    static var kind: Kind {
+        get { Kind(rawValue: UserDefaults.standard.string(forKey: kindKey) ?? "") ?? .webdav }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: kindKey) }
+    }
+
+    /// The signed-in cloud provider, when sync goes to Google Drive / OneDrive.
+    static var cloudProvider: CloudProvider? {
+        switch kind {
+        case .webdav: return nil
+        case .google: return .google
+        case .microsoft: return .microsoft
+        }
+    }
+
+    static var cloudAccount: String { UserDefaults.standard.string(forKey: accountKey) ?? "" }
 
     static var address: String {
         get { UserDefaults.standard.string(forKey: urlKey) ?? "" }
@@ -193,22 +228,74 @@ enum SyncConfig {
         CredentialVault.get(sourceId: vaultId) ?? ("", "")
     }
 
-    static var isConfigured: Bool { !address.isEmpty }
+    static var isConfigured: Bool {
+        if let p = cloudProvider { return CredentialVault.get(sourceId: cloudVaultId(p)) != nil }
+        return !address.isEmpty
+    }
+
+    /// Where sync goes, for display.
+    static var summary: String {
+        if let p = cloudProvider { return "\(p.label) (\(cloudAccount))" }
+        return address
+    }
 
     static func save(address: String, username: String, password: String) {
         self.address = address.trimmingCharacters(in: .whitespacesAndNewlines)
         CredentialVault.put(sourceId: vaultId, username: username, password: password)
+        kind = .webdav
     }
 
+    /// Finishes a cloud sign-in: creates the sync folder in the account, then
+    /// points sync at it.
+    @MainActor
+    static func connectCloud(_ p: CloudProvider, account: String, refreshToken: String) async throws {
+        let session = makeSession(p, account: account, refreshToken: refreshToken)
+        switch p {
+        case .google: try await GoogleDriveStore(session: session).ensureFolder()
+        case .microsoft: try await OneDriveStore(session: session).ensureFolder()
+        }
+        CredentialVault.put(sourceId: cloudVaultId(p), username: account, password: refreshToken)
+        UserDefaults.standard.set(account, forKey: accountKey)
+        sessions[p] = session
+        kind = p == .google ? .google : .microsoft
+    }
+
+    private static func makeSession(_ p: CloudProvider, account: String, refreshToken: String) -> CloudSession {
+        let id = cloudVaultId(p)
+        return CloudSession(provider: p, account: account, refreshToken: refreshToken) { rotated in
+            CredentialVault.put(sourceId: id, username: account, password: rotated)
+        }
+    }
+
+    /// Turns sync off and signs out of any cloud account.
     static func clear() {
         UserDefaults.standard.removeObject(forKey: urlKey)
+        UserDefaults.standard.removeObject(forKey: kindKey)
+        UserDefaults.standard.removeObject(forKey: accountKey)
         CredentialVault.delete(sourceId: vaultId)
+        for p in CloudProvider.allCases { CredentialVault.delete(sourceId: cloudVaultId(p)) }
+        sessions = [:]
     }
 
-    static func client() -> WebDavClient? {
+    static func client() -> (any SyncStore)? {
         guard isConfigured else { return nil }
+        if let p = cloudProvider {
+            let session: CloudSession
+            if let s = sessions[p] {
+                session = s
+            } else {
+                guard let saved = CredentialVault.get(sourceId: cloudVaultId(p)) else { return nil }
+                session = makeSession(p, account: saved.username, refreshToken: saved.password)
+                sessions[p] = session
+            }
+            switch p {
+            case .google: return GoogleDriveStore(session: session)
+            case .microsoft: return OneDriveStore(session: session)
+            }
+        }
         let c = credentials
-        return WebDavClient(address: address, username: c.username, password: c.password)
+        guard let webdav = WebDavClient(address: address, username: c.username, password: c.password) else { return nil }
+        return webdav
     }
 }
 
@@ -273,7 +360,7 @@ final class SyncManager: ObservableObject {
         return ok
     }
 
-    private func runOnce(_ client: WebDavClient, reason: String) async -> Bool {
+    private func runOnce(_ client: any SyncStore, reason: String) async -> Bool {
         let mine = SyncDevice.shardName
         do {
             var pulled = 0

@@ -268,6 +268,8 @@ class MainActivity : ComponentActivity() {
             var tmdbApiKey by remember { mutableStateOf(app.movieMetadata.apiKey) }
             var autoResumed by remember { mutableStateOf(false) }
             var syncSummary by remember { mutableStateOf(app.sync.describe()) }
+            var cloudSignIn by remember { mutableStateOf<io.tapper.firetv.data.CloudSignInState?>(null) }
+            var cloudSignInJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
             // A plain SharedPreferences read (via epgOverrides.get) is not
             // observed by Compose, so overrides are mirrored into state here.
             // Reassigning this map is what makes every screen that reads
@@ -304,6 +306,32 @@ class MainActivity : ComponentActivity() {
                         },
                         onFailure = { "Sync failed: " + (it.message ?: "unknown error") },
                     )
+                }
+            }
+
+            // Google / Microsoft device-code sign-in: show the code, wait for the
+            // user to approve on their phone, then sync into the folder the
+            // sign-in created.
+            fun startCloudSignIn(p: io.tapper.firetv.data.CloudProvider) {
+                cloudSignInJob?.cancel()
+                cloudSignIn = io.tapper.firetv.data.CloudSignInState(p)
+                cloudSignInJob = lifecycleScope.launch {
+                    try {
+                        val code = withContext(Dispatchers.IO) { app.sync.startCloudSignIn(p) }
+                        cloudSignIn = io.tapper.firetv.data.CloudSignInState(p, code.userCode, code.verificationUrl)
+                        val account = app.sync.finishCloudSignIn(code)
+                        app.logEvent("SYNC", "Signed in to ${p.label} as $account")
+                        cloudSignIn = null
+                        syncSummary = app.sync.describe()
+                        runSync()
+                    } catch (c: kotlinx.coroutines.CancellationException) {
+                        throw c
+                    } catch (t: Throwable) {
+                        app.logEvent("SYNC", "${p.label} sign-in failed: ${t.message}")
+                        cloudSignIn = io.tapper.firetv.data.CloudSignInState(
+                            p, error = t.message ?: "Sign-in failed."
+                        )
+                    }
                 }
             }
 
@@ -963,6 +991,11 @@ class MainActivity : ComponentActivity() {
                         },
                         onSyncNow = { runSync() },
                         onDisableSync = { app.sync.disable(); syncSummary = app.sync.describe() },
+                        cloudSignIn = cloudSignIn,
+                        onCloudSignIn = { startCloudSignIn(it) },
+                        onCancelCloudSignIn = {
+                            cloudSignInJob?.cancel(); cloudSignInJob = null; cloudSignIn = null
+                        },
                         onExit = { pop() },
                         catalogue = catalogue,
                         repo = app.repository,

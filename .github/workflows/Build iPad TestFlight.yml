@@ -104,6 +104,12 @@ jobs:
       - name: Archive
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Optional: cloud sync sign-in (Settings > Sync). Same secrets as the
+          # Fire TV workflow; empty just means the sign-in buttons say they
+          # aren't set up. See README, "Cloud sync setup".
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          MICROSOFT_OAUTH_CLIENT_ID: ${{ secrets.MICROSOFT_OAUTH_CLIENT_ID }}
         run: |
           set -euo pipefail
           xcodebuild -project ipad/TapperIPad.xcodeproj \
@@ -117,6 +123,9 @@ jobs:
             CODE_SIGN_IDENTITY="Apple Distribution" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             CURRENT_PROJECT_VERSION="$((1000 + GITHUB_RUN_NUMBER))" \
+            GOOGLE_OAUTH_CLIENT_ID="$GOOGLE_OAUTH_CLIENT_ID" \
+            GOOGLE_OAUTH_CLIENT_SECRET="$GOOGLE_OAUTH_CLIENT_SECRET" \
+            MICROSOFT_OAUTH_CLIENT_ID="$MICROSOFT_OAUTH_CLIENT_ID" \
             archive
 
       # Uploads straight to App Store Connect (internal TestFlight testing —

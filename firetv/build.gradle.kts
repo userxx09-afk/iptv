@@ -3,6 +3,17 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+/**
+ * OAuth client IDs for "Sign in with Google / Microsoft" under Shared watch
+ * history. Read from environment variables (CI passes them from repository
+ * secrets - see the workflow) or from ~/.gradle/gradle.properties for a local
+ * build. Left empty, the app still builds; the sign-in buttons just explain
+ * that cloud sign-in isn't set up. Setup steps: README, "Cloud sync setup".
+ */
+fun oauthSetting(name: String): String =
+    (System.getenv(name)?.takeIf { it.isNotBlank() } ?: project.findProperty(name)?.toString() ?: "")
+        .trim().replace("\"", "")
+
 android {
     namespace = "io.tapper.firetv"
 
@@ -20,6 +31,24 @@ android {
      * beyond signing sideloadable debug builds of this app.
      */
     signingConfigs {
+        /**
+         * The private release key, when CI has one (repository secrets
+         * RELEASE_KEYSTORE_BASE64 / RELEASE_KEYSTORE_PASSWORD /
+         * RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD - see the workflow).
+         * The committed debug key below is public, so anyone could sign an
+         * APK that Android would accept as an update to this app; a private
+         * key closes that. Switching keys needs one uninstall/reinstall on
+         * each device, which is why it is opt-in.
+         */
+        val releaseStore = System.getenv("RELEASE_KEYSTORE_PATH")?.let { file(it) }
+        if (releaseStore != null && releaseStore.exists()) {
+            create("release") {
+                storeFile = releaseStore
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
         getByName("debug") {
             storeFile = file("debug.keystore")
             storePassword = "android"
@@ -42,12 +71,24 @@ android {
         // to the constant.
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 33
         // Bump this by hand when features change.
-        versionName = "0.15.0"
+        versionName = "2.0.0"
+        buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${oauthSetting("GOOGLE_OAUTH_CLIENT_ID")}\"")
+        buildConfigField("String", "GOOGLE_OAUTH_CLIENT_SECRET", "\"${oauthSetting("GOOGLE_OAUTH_CLIENT_SECRET")}\"")
+        buildConfigField("String", "MICROSOFT_OAUTH_CLIENT_ID", "\"${oauthSetting("MICROSOFT_OAUTH_CLIENT_ID")}\"")
     }
     buildTypes {
+        /**
+         * What CI ships. Unlike the debug build it used to ship, this one is
+         * not debuggable (no attaching a debugger or `run-as` to read the
+         * app's files over adb), and R8 shrinks and obfuscates the code -
+         * class and method names become meaningless letters, unused code is
+         * removed, and Log calls are stripped (proguard-rules.pro).
+         */
         release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

@@ -166,24 +166,40 @@ class AppUpdater(private val context: Context) {
 
     private class Release(val build: Int, val apkUrl: String, val sizeBytes: Long)
 
+    /**
+     * The newest Tapper IPTV build in the prod repo. That repo holds every
+     * app's installable builds, so "latest release" could be another app's -
+     * this looks through recent releases for this app's tag prefix instead.
+     */
     private fun fetchLatest(): Release? {
-        val conn = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
+        val conn = URL("https://api.github.com/repos/$REPO/releases?per_page=50").openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = 10_000
             conn.readTimeout = 15_000
             conn.setRequestProperty("Accept", "application/vnd.github+json")
             conn.setRequestProperty("User-Agent", "TapperIPTV-updater")
             if (conn.responseCode != 200) return null
-            val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-            val build = json.optString("tag_name").removePrefix("build-").toIntOrNull() ?: return null
-            val assets = json.optJSONArray("assets") ?: return null
-            for (i in 0 until assets.length()) {
-                val a = assets.getJSONObject(i)
-                if (a.optString("name").endsWith(".apk")) {
-                    return Release(build, a.getString("browser_download_url"), a.optLong("size", -1L))
+            val releases = org.json.JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
+            var best: Release? = null
+            for (r in 0 until releases.length()) {
+                val json = releases.getJSONObject(r)
+                if (json.optBoolean("draft") || json.optBoolean("prerelease")) continue
+                val build = json.optString("tag_name").takeIf { it.startsWith(TAG_PREFIX) }
+                    ?.removePrefix(TAG_PREFIX)?.toIntOrNull() ?: continue
+                if (best != null && build <= best.build) continue
+                val assets = json.optJSONArray("assets") ?: continue
+                for (i in 0 until assets.length()) {
+                    val a = assets.getJSONObject(i)
+                    // Only downloads from GitHub itself, never a URL some
+                    // other host was able to put in the listing.
+                    val url = a.getString("browser_download_url")
+                    if (a.optString("name").endsWith(".apk") && url.startsWith("https://github.com/")) {
+                        best = Release(build, url, a.optLong("size", -1L))
+                        break
+                    }
                 }
             }
-            return null
+            return best
         } finally {
             conn.disconnect()
         }
@@ -217,7 +233,9 @@ class AppUpdater(private val context: Context) {
     private fun updateDir(): File = File(context.cacheDir, "updates").apply { mkdirs() }
 
     private companion object {
-        const val REPO = "userxx09-afk/iptv"
+        /** Public, releases-only repo; the source repo itself is private. */
+        const val REPO = "userxx09-afk/prod"
+        const val TAG_PREFIX = "iptv-build-"
         const val CHECK_EVERY_MS = 6L * 60L * 60L * 1000L
     }
 }

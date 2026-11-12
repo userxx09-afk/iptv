@@ -10,8 +10,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Required to publish a release. The default GITHUB_TOKEN is read-only on
-# repositories created after early 2023, and publishing 403s without this.
+# Releases go to the prod repo with PROD_REPO_TOKEN. Write access here is only
+# for the transition release below, while this repo is still public.
 permissions:
   contents: write
 
@@ -35,13 +35,44 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build debug APK
-        run: gradle :firetv:assembleDebug --no-daemon --stacktrace
+      # Cloud sync sign-in (Settings > Shared watch history). Optional: without
+      # these secrets the build still succeeds and the sign-in buttons say
+      # they aren't set up. See README, "Cloud sync setup".
+      # Optional private signing key. Without these secrets the build is
+      # signed with the committed debug key, exactly as before.
+      - name: Restore release keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build release APK (shrunk and obfuscated)
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          MICROSOFT_OAUTH_CLIENT_ID: ${{ secrets.MICROSOFT_OAUTH_CLIENT_ID }}
+        run: gradle :firetv:assembleRelease --no-daemon --stacktrace
 
       - name: Stage APK
         run: |
           mkdir -p dist
-          cp firetv/build/outputs/apk/debug/*.apk dist/tapper-iptv-${{ github.run_number }}.apk
+          cp firetv/build/outputs/apk/release/*.apk dist/tapper-iptv-${{ github.run_number }}.apk
+
+      # R8's name map, needed to read a crash stack trace from the obfuscated
+      # build. Not attached to the release. (On a public repo, any signed-in
+      # GitHub user can download Actions artifacts - another reason to go private.)
+      - name: Upload R8 mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: r8-mapping-${{ github.run_number }}
+          path: firetv/build/outputs/mapping/release/mapping.txt
+          retention-days: 90
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -50,14 +81,51 @@ jobs:
           path: dist/*.apk
           retention-days: 30
 
-      # Artifacts need a signed-in session to download, which Downloader on
-      # Fire TV cannot provide. A release asset on a public repo is a plain URL.
-      - name: Publish release
+      # The source repo is private, so installable builds go to the public
+      # releases-only "prod" repo, which every Tapper app publishes to.
+      # PROD_REPO_TOKEN: a fine-grained token with Contents: read and write on
+      # userxx09-afk/prod only (README, "Release pipeline").
+      - name: Publish build to prod
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: userxx09-afk/prod
+          token: ${{ secrets.PROD_REPO_TOKEN }}
+          target_commitish: main
+          tag_name: iptv-build-${{ github.run_number }}
+          name: Tapper IPTV build ${{ github.run_number }}
+          make_latest: false
+          body: |
+            Tapper IPTV for Fire TV / Android, build ${{ github.run_number }}.
+          files: dist/*.apk
+
+      # A fixed address for the Downloader app, always pointing at the newest
+      # build: https://github.com/userxx09-afk/prod/releases/download/iptv-latest/tapper-iptv.apk
+      - name: Refresh the "latest" install link
+        run: cp dist/*.apk dist/tapper-iptv.apk
+      - name: Publish latest link to prod
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: userxx09-afk/prod
+          token: ${{ secrets.PROD_REPO_TOKEN }}
+          target_commitish: main
+          tag_name: iptv-latest
+          name: Tapper IPTV (latest)
+          make_latest: false
+          overwrite_files: true
+          body: |
+            Always the newest Tapper IPTV build. Install link for Downloader:
+            https://github.com/userxx09-afk/prod/releases/download/iptv-latest/tapper-iptv.apk
+          files: dist/tapper-iptv.apk
+
+      # Transition only: installs from before the move check this repo's own
+      # latest release. While the repo is public, keep publishing here so they
+      # get the update that points them at prod. Skipped once it's private.
+      - name: Publish here too (while this repo is public)
+        if: github.event.repository.private != true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Tapper IPTV build ${{ github.run_number }}
           body: |
-            Debug-signed APK for sideloading to Fire TV or an Android tablet.
-            Built from ${{ github.sha }}.
-          files: dist/*.apk
+            Newer builds are at https://github.com/userxx09-afk/prod/releases/download/iptv-latest/tapper-iptv.apk
+          files: dist/tapper-iptv-*.apk
