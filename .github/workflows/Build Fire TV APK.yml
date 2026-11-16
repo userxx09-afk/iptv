@@ -76,6 +76,8 @@ jobs:
       # build. Not attached to the release. (On a public repo, any signed-in
       # GitHub user can download Actions artifacts - another reason to go private.)
       - name: Upload R8 mapping
+        # Artifact storage can fill up; that must never stop the release.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: r8-mapping-${{ github.run_number }}
@@ -83,6 +85,8 @@ jobs:
           retention-days: 90
 
       - name: Upload APK artifact
+        # Artifact storage can fill up; that must never stop the release.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: tapper-iptv-apk
