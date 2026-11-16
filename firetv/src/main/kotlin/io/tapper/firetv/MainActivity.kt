@@ -57,6 +57,8 @@ import io.tapper.firetv.ui.PresetSource
 import io.tapper.firetv.ui.SearchScreen
 import io.tapper.firetv.ui.theme.TapperTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -185,6 +187,22 @@ class MainActivity : ComponentActivity() {
             }
             var sources by remember { mutableStateOf(app.sourceStore.all()) }
             var active by remember { mutableStateOf(app.sourceStore.active()) }
+            // Sources whose live channels join the active one's lineup (Free
+            // TV next to a paid plan) - see SourceStore.alongsideIds.
+            var alongsideIds by remember { mutableStateOf(app.sourceStore.alongsideIds) }
+            val alongside = remember(sources, active, alongsideIds) { app.sourceStore.alongside(active) }
+            // Every source id whose guide rows belong to what's on screen: the
+            // active source, each one shown alongside it, and the GarysTV
+            // guide files. Every guide read goes through this.
+            val guideSourceIds = remember(active, alongside) {
+                listOf(active.id) + alongside.filter { it.kind != TvSource.Kind.FREE }.map { it.id } +
+                    io.tapper.firetv.data.EpgRepository.garysGuidesId(
+                        io.tapper.firetv.data.EpgRepository.usesFreeTvGuide(listOf(active) + alongside)
+                    )
+            }
+            // The GarysTV guide files (cached or bundled copy; refreshed from
+            // GitHub with the guide). Only their channel lists are read here.
+            var garysGuides by remember { mutableStateOf(app.garysFeed.guides(allowNetwork = false)) }
             var busy by remember { mutableStateOf(false) }
             var addError by remember { mutableStateOf<String?>(null) }
 
@@ -403,18 +421,51 @@ class MainActivity : ComponentActivity() {
             fun reloadNowPlaying() {
                 lifecycleScope.launch {
                     val map = withContext(Dispatchers.IO) {
-                        runCatching { app.epgDb.nowPlaying(active.id, System.currentTimeMillis()) }
+                        runCatching { app.epgDb.nowPlaying(guideSourceIds, System.currentTimeMillis()) }
                             .getOrDefault(emptyMap())
                     }
                     nowPlaying = map
                 }
             }
 
-            fun refreshEpg(catalogue: PlaylistRepository.Catalogue?) {
+            // Guide addresses each source shown alongside declared in its own
+            // playlist, kept from its last load for refreshEpg.
+            val alongsideDeclared = remember { HashMap<String, List<String>>() }
+
+            // [onlyStale] refreshes just the guides that are due, for the
+            // automatic refresh after a load; the Settings button does all.
+            fun refreshEpg(catalogue: PlaylistRepository.Catalogue?, onlyStale: Boolean = false) {
+                val primary = active
+                val extra = alongside
                 epgStatus = "Guide: updating..."
                 lifecycleScope.launch {
+                    // The GarysTV guide files first: small next to a provider's
+                    // guide, and all the Free TV channels have.
+                    val withFree = io.tapper.firetv.data.EpgRepository.usesFreeTvGuide(listOf(primary) + extra)
+                    val garysId = io.tapper.firetv.data.EpgRepository.garysGuidesId(withFree)
+                    if (!onlyStale || app.epg.isStale(garysId)) {
+                        app.epg.refreshGarysGuides(app.garysFeed, withFree).exceptionOrNull()?.let {
+                            logEvent("EPG", "GarysTV guides unavailable: ${it.message}")
+                        }
+                        garysGuides = withContext(Dispatchers.IO) { app.garysFeed.guides(allowNetwork = false) }
+                        epgOverrideRevision++
+                        reloadNowPlaying()
+                    }
+                    for (s2 in extra) {
+                        if (s2.kind == TvSource.Kind.FREE) continue
+                        if (onlyStale && !app.epg.isStale(s2.id)) continue
+                        app.epg.refresh(s2, alongsideDeclared[s2.id].orEmpty()).exceptionOrNull()?.let {
+                            logEvent("EPG", "Guide unavailable for ${s2.name}: ${it.message}")
+                        }
+                        reloadNowPlaying()
+                    }
+                    if (primary.kind == TvSource.Kind.FREE || (onlyStale && !app.epg.isStale(primary.id))) {
+                        epgStatus = null
+                        reloadNowPlaying()
+                        return@launch
+                    }
                     val result = app.epg.refresh(
-                        active,
+                        primary,
                         catalogue?.declaredEpgUrls.orEmpty(),
                         // Progress ticks so a large guide shows movement rather
                         // than looking frozen for several minutes.
@@ -433,7 +484,7 @@ class MainActivity : ComponentActivity() {
                         onFailure = { "Guide unavailable: ${it.message?.take(60)}" },
                     )
                     result.exceptionOrNull()?.let {
-                        logEvent("EPG", "Guide unavailable for ${active.name}: ${it.message}")
+                        logEvent("EPG", "Guide unavailable for ${primary.name}: ${it.message}")
                     }
                     reloadNowPlaying()
                 }
@@ -451,23 +502,57 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            fun loadActive(force: Boolean = false) {
-                replaceAll(Screen.Loading)
+            // [quiet]: reload behind whatever is on screen (Settings, after a
+            // source is shown alongside or not), if a lineup is already there.
+            fun loadActive(force: Boolean = false, quiet: Boolean = false) {
+                if (!quiet || stack.none { it is Screen.Browse }) replaceAll(Screen.Loading)
                 loadStatus = null
+                val primary = active
+                val extra = alongside
                 lifecycleScope.launch {
                     var reachedBrowse = false
-                    val res = app.repository.load(active, force) { label, partial ->
+                    // The sources shown alongside load at the same time as the
+                    // active one; whichever finishes later merges in, so a
+                    // slow one never holds up the other.
+                    var latest: PlaylistRepository.Catalogue? = null
+                    var extraCats: List<Pair<TvSource, PlaylistRepository.Catalogue>> = emptyList()
+                    // Always called on the main thread. The merge re-sorts the
+                    // whole live lineup, so it runs off it; a result that is
+                    // already out of date by the time it's ready is dropped.
+                    fun show() {
+                        val cat = latest ?: return
+                        val more = extraCats
+                        if (more.isEmpty()) { updateBrowseCatalogue(cat); return }
+                        lifecycleScope.launch {
+                            val merged = withContext(Dispatchers.Default) { app.repository.withAlongside(cat, more) }
+                            if (latest === cat && extraCats === more) updateBrowseCatalogue(merged)
+                        }
+                    }
+                    val extraJob = launch {
+                        if (extra.isEmpty()) return@launch
+                        val loaded = extra.map { s2 ->
+                            async {
+                                s2 to app.repository.load(s2, force).onFailure {
+                                    logEvent("LOAD", "${s2.name} (shown alongside): ${it.message}")
+                                }.getOrNull()
+                            }
+                        }.awaitAll().mapNotNull { (s2, c) -> c?.let { s2 to it } }
+                        loaded.forEach { (s2, c) -> alongsideDeclared[s2.id] = c.declaredEpgUrls }
+                        extraCats = loaded
+                        show()
+                    }
+                    val res = app.repository.load(primary, force) { label, partial ->
                         reachedBrowse = true
                         loadStatus = when (label) {
                             "movies" -> "Loading movies in the background..."
                             "series" -> "Loading shows in the background..."
                             else -> "Loading more in the background..."
                         }
-                        updateBrowseCatalogue(partial)
+                        lifecycleScope.launch(Dispatchers.Main) { latest = partial; show() }
                     }
                     loadStatus = null
                     res.fold(
-                        onSuccess = { updateBrowseCatalogue(it) },
+                        onSuccess = { latest = it; show() },
                         onFailure = {
                             logEvent("LOAD", "${active.name}: ${it.message}")
                             // A source that failed outright but never got as far
@@ -487,26 +572,38 @@ class MainActivity : ComponentActivity() {
                         for ((sectionKind, error) in cat.sectionErrors) {
                             logEvent("LOAD", "${active.name} ${sectionKind.name.lowercase()}: $error")
                         }
+                        // The sources alongside too: the last channel may be one
+                        // of theirs, and their guide addresses come from their
+                        // playlists (refreshEpg below).
+                        extraJob.join()
                         // Resume playback only once per launch, and only after
                         // the catalogue exists to resolve the id against.
                         if (resumeLast && !autoResumed) {
                             autoResumed = true
-                            val ch = cat.channels.firstOrNull { it.id == lastChannelId }
+                            val pool = app.repository.withAlongside(cat, extraCats).channels
+                            val ch = pool.firstOrNull { it.id == lastChannelId }
                             if (ch != null && ch.isPlayable) {
-                                val list = cat.channels.filter { it.kind == ch.kind }
+                                val list = pool.filter { it.kind == ch.kind }
                                 startPlayback(Playing(list, list.indexOf(ch).coerceAtLeast(0)))
                             }
                         }
-                        epgStatus = if (app.epg.hasData(active.id)) null else "Guide: none yet"
+                        epgStatus = if (guideSourceIds.any { app.epg.hasData(it) }) null else "Guide: none yet"
                         reloadNowPlaying()
                         // Refresh in the background; the channel list is already
                         // usable and must not wait on a 100MB guide download.
-                        if (app.epg.isStale(active.id)) refreshEpg(cat)
+                        refreshEpg(cat, onlyStale = true)
                     }
                 }
             }
 
             LaunchedEffect(active.id) { loadActive() }
+            var loadedAlongsideIds by remember { mutableStateOf(alongsideIds) }
+            LaunchedEffect(alongsideIds) {
+                if (alongsideIds != loadedAlongsideIds) {
+                    loadedAlongsideIds = alongsideIds
+                    loadActive(quiet = true)
+                }
+            }
 
             // Screen stays on while loading a big account (the screensaver
             // mid-load looked like a freeze) and while something plays; the
@@ -612,6 +709,11 @@ class MainActivity : ComponentActivity() {
             // The catalogue survives navigation: it lives on the Browse entry
             // at the bottom of the stack, so Settings and Search do not lose it.
             val catalogue = stack.filterIsInstance<Screen.Browse>().lastOrNull()?.catalogue
+            // Channels the GarysTV extra guides cover by name (Marquee Sports
+            // Network from a paid plan, ...), keyed like the manual overrides.
+            val guideNameMatches = remember(catalogue, garysGuides) {
+                catalogue?.let { app.garysFeed.nameMatches(it.channels, garysGuides) }.orEmpty()
+            }
 
             fun openSeries(series: Channel) {
                 seriesContext = series
@@ -638,8 +740,11 @@ class MainActivity : ComponentActivity() {
             // playlist or Xtream panel declared. Every guide lookup in this
             // app goes through this rather than reading epgChannelId directly.
             fun epgIdFor(ch: Channel): String {
-                val override = epgOverrideMap["${ch.sourceId}|${ch.id}"]
-                return EpgDatabase.normalizeId(if (!override.isNullOrBlank()) override else ch.epgChannelId)
+                val key = "${ch.sourceId}|${ch.id}"
+                val override = epgOverrideMap[key]
+                if (!override.isNullOrBlank()) return EpgDatabase.normalizeId(override)
+                guideNameMatches[key]?.let { return it }
+                return EpgDatabase.normalizeId(ch.epgChannelId)
             }
 
             // One lookup table per catalogue/override change instead of a scan
@@ -753,13 +858,13 @@ class MainActivity : ComponentActivity() {
 
                     current is Screen.EpgPick -> EpgPickerScreen(
                         channel = current.channel,
-                        candidates = remember(active.id, epgStatus) {
-                            runCatching { app.epgDb.guideChannelIds(active.id) }
+                        candidates = remember(guideSourceIds, epgStatus) {
+                            runCatching { app.epgDb.guideChannelIds(guideSourceIds) }
                                 .getOrDefault(emptySet()).sorted()
                         },
                         sampleTitle = { id ->
                             runCatching {
-                                app.epgDb.sampleTitle(active.id, id, System.currentTimeMillis())
+                                app.epgDb.sampleTitle(guideSourceIds, id, System.currentTimeMillis())
                             }.getOrNull()
                         },
                         currentOverride = app.epgOverrides.get(current.channel.sourceId, current.channel.id),
@@ -785,7 +890,7 @@ class MainActivity : ComponentActivity() {
                         onToggleFavorite = { app.favorites.toggle(it.sourceId, it.id) },
                         channels = catalogue.channels,
                         searchProgrammes = { q ->
-                            app.epgDb.search(active.id, q, System.currentTimeMillis())
+                            app.epgDb.search(guideSourceIds, q, System.currentTimeMillis())
                         },
                         channelForEpgId = ::channelForEpgId,
                         onPlay = { ch ->
@@ -850,14 +955,19 @@ class MainActivity : ComponentActivity() {
                     current is Screen.Settings -> SettingsScreen(
                         sources = sources,
                         activeId = active.id,
+                        alongsideIds = alongsideIds,
+                        onSetAlongside = { s2, on ->
+                            app.sourceStore.setAlongside(s2.id, on)
+                            alongsideIds = app.sourceStore.alongsideIds
+                        },
                         guideSummary = buildString {
-                            append(epgStatus ?: if (app.epg.hasData(active.id)) "Guide loaded." else "No guide data yet.")
+                            append(epgStatus ?: if (guideSourceIds.any { app.epg.hasData(it) }) "Guide loaded." else "No guide data yet.")
                             // Coverage is the number that actually explains a
                             // blank guide: rows can be stored yet match nothing
                             // if the panel's ids differ from its XMLTV ids.
                             val cat = catalogue
-                            if (cat != null && app.epg.hasData(active.id)) {
-                                val guideIds = runCatching { app.epgDb.guideChannelIds(active.id) }
+                            if (cat != null && guideSourceIds.any { app.epg.hasData(it) }) {
+                                val guideIds = runCatching { app.epgDb.guideChannelIds(guideSourceIds) }
                                     .getOrDefault(emptySet())
                                 val live = cat.channels.filter { it.kind == ContentKind.LIVE }
                                 val matched = live.count {
@@ -879,6 +989,8 @@ class MainActivity : ComponentActivity() {
                         onRemoveSource = { s2 ->
                             app.vault.delete(s2.id)
                             app.sourceStore.remove(s2.id)
+                            app.sourceStore.setAlongside(s2.id, false)
+                            alongsideIds = app.sourceStore.alongsideIds
                             sources = app.sourceStore.all()
                             if (active.id == s2.id) {
                                 app.sourceStore.activeId = TvSource.BUILTIN.id
@@ -1069,7 +1181,7 @@ class MainActivity : ComponentActivity() {
                         tmdbKeyConfigured = tmdbApiKey.isNotBlank(),
                         scheduleFor = { ch ->
                             app.epgDb.upcoming(
-                                active.id,
+                                guideSourceIds,
                                 epgIdFor(ch),
                                 System.currentTimeMillis(),
                             )
@@ -1141,7 +1253,7 @@ class MainActivity : ComponentActivity() {
                         sports = app.sports,
                         channels = catalogue.channels,
                         epgIdFor = ::epgIdFor,
-                        listingsBetween = { from, to -> app.epgDb.startingBetween(active.id, from, to) },
+                        listingsBetween = { from, to -> app.epgDb.startingBetween(guideSourceIds, from, to) },
                         onWatch = { ch -> startPlayback(Playing(listOf(ch), 0)); pop() },
                         onRemind = { ch, g, m ->
                             // The guide's listing when there is one (its start is what the
@@ -1232,7 +1344,7 @@ class MainActivity : ComponentActivity() {
                         allLiveChannels = p.allLiveChannels,
                         nowPlaying = { ch -> nowPlaying[epgIdFor(ch)] },
                         scheduleFor = { ch ->
-                            app.epgDb.upcoming(active.id, epgIdFor(ch), System.currentTimeMillis())
+                            app.epgDb.upcoming(guideSourceIds, epgIdFor(ch), System.currentTimeMillis())
                         },
                         resumeAt = { ch -> app.sync.resumeAt(ch.id) },
                         onChannelChanged = { ch ->

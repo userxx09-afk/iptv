@@ -261,11 +261,24 @@ class EpgDatabase(context: Context) : SQLiteOpenHelper(context, "tapper_epg.db",
             "SELECT fetched_utc FROM epg_meta WHERE source_id = ?", arrayOf(sourceId)
         ).use { if (it.moveToFirst()) it.getLong(0) else 0L }
 
+    // Every read below takes a list of source ids, not one: the lineup on
+    // screen can mix several sources (the active one, any shown alongside it,
+    // and the GarysTV guide files - see EpgRepository.GARYS_GUIDES_ID), and
+    // each keeps its own guide rows under its own id.
+    private fun inMarks(ids: List<String>) = ids.joinToString(",") { "?" }
+
+    /** The same programme can come from two of the sources being read
+     *  (a channel the provider's guide and a GarysTV guide file both list);
+     *  screens key their lists on (channel, start), so a repeat is a crash. */
+    private fun MutableList<Programme>.dedupe(): List<Programme> =
+        distinctBy { it.channelId to it.startUtc }
+
     /** Distinct guide channel ids, so settings can report match coverage. */
-    fun guideChannelIds(sourceId: String): Set<String> {
+    fun guideChannelIds(sourceIds: List<String>): Set<String> {
         val out = HashSet<String>()
+        if (sourceIds.isEmpty()) return out
         readableDatabase.rawQuery(
-            "SELECT DISTINCT ch FROM epg WHERE source_id = ?", arrayOf(sourceId)
+            "SELECT DISTINCT ch FROM epg WHERE source_id IN (${inMarks(sourceIds)})", sourceIds.toTypedArray()
         ).use { c -> while (c.moveToNext()) out.add(c.getString(0)) }
         return out
     }
@@ -277,12 +290,14 @@ class EpgDatabase(context: Context) : SQLiteOpenHelper(context, "tapper_epg.db",
      * currently on it is the one thing that actually lets a person confirm
      * they've found the right entry before assigning it to a channel.
      */
-    fun sampleTitle(sourceId: String, ch: String, now: Long): String? =
-        readableDatabase.rawQuery(
-            "SELECT title FROM epg WHERE source_id = ? AND ch = ? AND end_utc > ? " +
+    fun sampleTitle(sourceIds: List<String>, ch: String, now: Long): String? {
+        if (sourceIds.isEmpty()) return null
+        return readableDatabase.rawQuery(
+            "SELECT title FROM epg WHERE source_id IN (${inMarks(sourceIds)}) AND ch = ? AND end_utc > ? " +
                 "ORDER BY start_utc LIMIT 1",
-            arrayOf(sourceId, ch, now.toString())
+            (sourceIds + listOf(ch, now.toString())).toTypedArray()
         ).use { if (it.moveToFirst()) it.getString(0) else null }
+    }
 
     fun countFor(sourceId: String): Int =
         readableDatabase.rawQuery(
@@ -294,12 +309,13 @@ class EpgDatabase(context: Context) : SQLiteOpenHelper(context, "tapper_epg.db",
      * list rather than one per visible row - per-row queries are what make
      * these apps stutter while scrolling a long channel list.
      */
-    fun nowPlaying(sourceId: String, now: Long): Map<String, Programme> {
+    fun nowPlaying(sourceIds: List<String>, now: Long): Map<String, Programme> {
         val out = HashMap<String, Programme>()
+        if (sourceIds.isEmpty()) return out
         readableDatabase.rawQuery(
             "SELECT ch, start_utc, end_utc, title, descr FROM epg " +
-                "WHERE source_id = ? AND start_utc <= ? AND end_utc > ?",
-            arrayOf(sourceId, now.toString(), now.toString())
+                "WHERE source_id IN (${inMarks(sourceIds)}) AND start_utc <= ? AND end_utc > ?",
+            (sourceIds + listOf(now.toString(), now.toString())).toTypedArray()
         ).use { c ->
             while (c.moveToNext()) {
                 out[c.getString(0)] = Programme(
@@ -310,53 +326,53 @@ class EpgDatabase(context: Context) : SQLiteOpenHelper(context, "tapper_epg.db",
         return out
     }
 
-    fun upcoming(sourceId: String, channelId: String, now: Long, limit: Int = 8): List<Programme> {
+    fun upcoming(sourceIds: List<String>, channelId: String, now: Long, limit: Int = 8): List<Programme> {
         val out = ArrayList<Programme>()
+        if (sourceIds.isEmpty()) return out
         readableDatabase.rawQuery(
             "SELECT ch, start_utc, end_utc, title, descr FROM epg " +
-                "WHERE source_id = ? AND ch = ? AND end_utc > ? ORDER BY start_utc LIMIT ?",
-            arrayOf(sourceId, normalizeId(channelId), now.toString(), limit.toString())
+                "WHERE source_id IN (${inMarks(sourceIds)}) AND ch = ? AND end_utc > ? ORDER BY start_utc LIMIT ?",
+            (sourceIds + listOf(normalizeId(channelId), now.toString(), (limit * sourceIds.size).toString())).toTypedArray()
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(Programme(c.getString(0), c.getLong(1), c.getLong(2), c.getString(3), c.getString(4)))
             }
         }
-        return out
+        return out.dedupe().take(limit)
     }
 
     /** Programme title search, restricted to the future and the current show. */
-    fun search(sourceId: String, query: String, now: Long, limit: Int = 60): List<Programme> {
+    fun search(sourceIds: List<String>, query: String, now: Long, limit: Int = 60): List<Programme> {
         val out = ArrayList<Programme>()
+        if (sourceIds.isEmpty()) return out
         readableDatabase.rawQuery(
             "SELECT ch, start_utc, end_utc, title, descr FROM epg " +
-                "WHERE source_id = ? AND end_utc > ? AND title LIKE ? " +
+                "WHERE source_id IN (${inMarks(sourceIds)}) AND end_utc > ? AND title LIKE ? " +
                 "ORDER BY start_utc LIMIT ?",
-            arrayOf(sourceId, now.toString(), "%" + query + "%", limit.toString())
+            (sourceIds + listOf(now.toString(), "%" + query + "%", limit.toString())).toTypedArray()
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(Programme(c.getString(0), c.getLong(1), c.getLong(2), c.getString(3), c.getString(4)))
             }
         }
-        return out
+        return out.dedupe()
     }
 
-    /**
-     * Every listing that starts in [fromUtc, toUtc), grouped by guide channel id: what My Teams
-     * looks through for a game (see TeamsScreen). Uses the epg_window index.
-     */
-    fun startingBetween(sourceId: String, fromUtc: Long, toUtc: Long): Map<String, List<Programme>> {
+    /** Every listing that starts in [fromUtc, toUtc), grouped by guide channel id. */
+    fun startingBetween(sourceIds: List<String>, fromUtc: Long, toUtc: Long): Map<String, List<Programme>> {
         val out = HashMap<String, MutableList<Programme>>()
+        if (sourceIds.isEmpty()) return out
         readableDatabase.rawQuery(
             "SELECT ch, start_utc, end_utc, title, descr FROM epg " +
-                "WHERE source_id = ? AND start_utc >= ? AND start_utc < ?",
-            arrayOf(sourceId, fromUtc.toString(), toUtc.toString())
+                "WHERE source_id IN (${inMarks(sourceIds)}) AND start_utc >= ? AND start_utc < ?",
+            (sourceIds + listOf(fromUtc.toString(), toUtc.toString())).toTypedArray()
         ).use { c ->
             while (c.moveToNext()) {
                 out.getOrPut(c.getString(0)) { ArrayList() }
                     .add(Programme(c.getString(0), c.getLong(1), c.getLong(2), c.getString(3), c.getString(4)))
             }
         }
-        return out
+        return out.mapValues { it.value.dedupe() }
     }
 
     fun prune(cutoffUtc: Long) {

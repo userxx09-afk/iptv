@@ -28,7 +28,9 @@ data class TvSource(
      *  logoUrl - see [io.tapper.firetv.data.LogoFolderResolver]. */
     val logoFolderUri: String? = null,
 ) {
-    enum class Kind { M3U, XTREAM }
+    /** FREE is the Free TV lineup GarysTV keeps (see GarysTvFeed);
+     *  [location] is unused for it. */
+    enum class Kind { M3U, XTREAM, FREE }
 
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("kind", kind.name)
@@ -43,6 +45,18 @@ data class TvSource(
             location = "https://iptv-org.github.io/iptv/index.m3u",
             builtIn = true,
         )
+
+        /** The GarysTV Free TV lineup: about 140 US channels streamed openly by
+         *  their owners or licensed free services, with guide listings. */
+        val FREE_TV = TvSource(
+            id = "free-tv",
+            name = "Free TV",
+            kind = Kind.FREE,
+            location = "github.com/userxx09-afk/Garystv",
+            builtIn = true,
+        )
+
+        val BUILT_INS = listOf(BUILTIN, FREE_TV)
 
         fun fromJson(o: JSONObject) = TvSource(
             id = o.getString("id"),
@@ -62,15 +76,20 @@ class SourceStore(context: Context) {
         context.getSharedPreferences("tapper_sources", Context.MODE_PRIVATE)
 
     fun all(): List<TvSource> {
-        val raw = prefs.getString("sources", null) ?: return listOf(TvSource.BUILTIN)
-        val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return listOf(TvSource.BUILTIN)
+        val raw = prefs.getString("sources", null) ?: return TvSource.BUILT_INS
+        val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return TvSource.BUILT_INS
         val list = ArrayList<TvSource>()
         for (i in 0 until arr.length()) {
             arr.optJSONObject(i)?.let { runCatching { TvSource.fromJson(it) }.getOrNull()?.let(list::add) }
         }
         // The built-in source is never removable — deleting it would leave a new
         // user in an empty app with no obvious way back.
-        if (list.none { it.builtIn }) list.add(0, TvSource.BUILTIN)
+        if (list.none { it.id == TvSource.BUILTIN.id }) list.add(0, TvSource.BUILTIN)
+        // Free TV arrived later than the rest: added for everyone, right
+        // after the iptv-org one.
+        if (list.none { it.id == TvSource.FREE_TV.id }) {
+            list.add(list.indexOfFirst { it.id == TvSource.BUILTIN.id } + 1, TvSource.FREE_TV)
+        }
         return list
     }
 
@@ -92,6 +111,26 @@ class SourceStore(context: Context) {
         set(v) = prefs.edit().putString("active", v).apply()
 
     fun active(): TvSource = all().firstOrNull { it.id == activeId } ?: TvSource.BUILTIN
+
+    /**
+     * Sources whose live channels are shown alongside the active one's, in
+     * the same lineup and guide (Free TV next to a paid plan, say). Free TV
+     * is on by default; never set means that default still applies.
+     */
+    var alongsideIds: Set<String>
+        get() = prefs.getStringSet("alongside", null)?.toSet() ?: setOf(TvSource.FREE_TV.id)
+        set(v) = prefs.edit().putStringSet("alongside", v.toSet()).apply()
+
+    fun setAlongside(id: String, on: Boolean) {
+        alongsideIds = if (on) alongsideIds + id else alongsideIds - id
+    }
+
+    /** The sources to show alongside [primary]: never itself, and only ones
+     *  that still exist. */
+    fun alongside(primary: TvSource): List<TvSource> {
+        val ids = alongsideIds
+        return all().filter { it.id in ids && it.id != primary.id }
+    }
 
     /** Startup behaviour: whether to auto-play [lastChannelId] on launch. */
     var resumeLastChannel: Boolean

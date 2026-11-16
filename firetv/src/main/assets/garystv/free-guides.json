@@ -1,0 +1,631 @@
+{
+ "about": "Built by `npm run free-guides`: where each Free TV channel gets its listings. Each channel is matched by its tvgId (from free-channels.json); guideId is its <channel id> in that file. Do not edit by hand; add aliases or files in scripts/free-guides.js instead.",
+ "updated": "2026-11-15",
+ "guides": [
+  {
+   "id": "epgshare-us2",
+   "name": "Extra guide (epgshare01 US2)",
+   "url": "https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz",
+   "freeTv": true,
+   "channels": [
+    {
+     "name": "ACC Digital Network",
+     "guideId": "ACC.Digital.Network.us2",
+     "tvgId": "ACCDigitalNetwork.us@SD"
+    },
+    {
+     "name": "bon appetit",
+     "guideId": "Bon.Appétit.TV.us2",
+     "tvgId": "bonappetit.us@SD"
+    },
+    {
+     "name": "Court TV",
+     "guideId": "Court.TV.us2",
+     "tvgId": "CourtTV.us@SD"
+    },
+    {
+     "name": "Create",
+     "guideId": "Create.us2",
+     "tvgId": "Create.us@SD"
+    },
+    {
+     "name": "Curiosity NOW EN",
+     "guideId": "Curiosity.NOW.us2",
+     "tvgId": "CuriosityNOW.de@EN"
+    },
+    {
+     "name": "FNX",
+     "guideId": "FNX.First.Nations.Experience.us2",
+     "tvgId": "FNX.us@SD"
+    },
+    {
+     "name": "Fox Soul",
+     "guideId": "FOX.SOUL.us2",
+     "tvgId": "FoxSoul.us@SD"
+    },
+    {
+     "name": "Grjngo Western Movies",
+     "guideId": "Grjngo.-.Western.Movies.us2",
+     "tvgId": "GrjngoWesternMovies.de@SD"
+    },
+    {
+     "name": "Kartoon Channel!",
+     "guideId": "Kartoon.Channel.us2",
+     "tvgId": "KartoonChannel.us@SD"
+    },
+    {
+     "name": "MagellanTV Now",
+     "guideId": "MagellanTV.Now.us2",
+     "tvgId": "MagellanTVNow.us@SD"
+    },
+    {
+     "name": "MovieSphere Gold WFXT",
+     "guideId": "MovieSphere.Gold.us2",
+     "tvgId": "MovieSphereGold.us@WFXT"
+    },
+    {
+     "name": "NBC Comedy Vault",
+     "guideId": "NBC.Comedy.Vault.us2",
+     "tvgId": "NBCComedyVault.us@SD"
+    },
+    {
+     "name": "NBC Sports NOW",
+     "guideId": "NBC.Sports.Now.us2",
+     "tvgId": "NBCSportsNOW.us@SD"
+    },
+    {
+     "name": "NHL Network",
+     "guideId": "NHL.Network.HD.us2",
+     "tvgId": "NHLNetwork.us@SD"
+    },
+    {
+     "name": "Nosey",
+     "guideId": "Nosey.us2",
+     "tvgId": "Nosey.us@US"
+    },
+    {
+     "name": "Outdoor Channel",
+     "guideId": "Outdoor.Channel.HD.us2",
+     "tvgId": "OutdoorChannel.us@SD"
+    },
+    {
+     "name": "PBS Kids",
+     "guideId": "PBS.KIDS.HD.us2",
+     "tvgId": "PBSKids.us@SD"
+    },
+    {
+     "name": "Real America's Voice",
+     "guideId": "Real.Americas.Voice.us2",
+     "tvgId": "RealAmericasVoice.us@SD"
+    },
+    {
+     "name": "Roar KOKI-TV",
+     "guideId": "ROAR.TV.us2",
+     "tvgId": "Roar.us@KOKITV"
+    },
+    {
+     "name": "Salem News Channel",
+     "guideId": "Salem.News.Channel.us2",
+     "tvgId": "SalemNewsChannel.us@SD"
+    },
+    {
+     "name": "Scripps News",
+     "guideId": "Scripps.News.us2",
+     "tvgId": "ScrippsNews.us@SD"
+    },
+    {
+     "name": "SportsGrid",
+     "guideId": "SportsGrid.us2",
+     "tvgId": "SportsGrid.us@SD"
+    },
+    {
+     "name": "Stories by AMC",
+     "guideId": "Stories.by.AMC.us2",
+     "tvgId": "StoriesbyAMC.us@SD"
+    },
+    {
+     "name": "Tastemade",
+     "guideId": "Tastemade.us2",
+     "tvgId": "Tastemade.us@US"
+    },
+    {
+     "name": "Tennis Channel",
+     "guideId": "Tennis.Channel.HD.us2",
+     "tvgId": "TennisChannel.us@SD"
+    },
+    {
+     "name": "The First TV",
+     "guideId": "The.First.us2",
+     "tvgId": "TheFirstTV.us@SD"
+    },
+    {
+     "name": "The Weather Channel",
+     "guideId": "The.Weather.Channel.HD.us2",
+     "tvgId": "TheWeatherChannel.us@SD"
+    },
+    {
+     "name": "The Young Turks",
+     "guideId": "TYT.The.Young.Turks.us2",
+     "tvgId": "TheYoungTurks.us@SD"
+    },
+    {
+     "name": "WeatherNation",
+     "guideId": "Weather.Nation.TV.HD.us2",
+     "tvgId": "WeatherNation.us@SD"
+    },
+    {
+     "name": "World Channel",
+     "guideId": "WORLD.Channel.us2",
+     "tvgId": "WorldChannel.us@SD"
+    },
+    {
+     "name": "Xplore TV",
+     "guideId": "Xplore.us2",
+     "tvgId": "XploreTV.us@SD"
+    }
+   ]
+  },
+  {
+   "id": "free-plex",
+   "name": "Free TV guide (Plex)",
+   "url": "https://epgshare01.online/epgshare01/epg_ripper_PLEX1.xml.gz",
+   "freeTv": true,
+   "channels": [
+    {
+     "name": "AccuWeather NOW",
+     "guideId": "plex.tv.AccuWeather.NOW.plex",
+     "tvgId": "AccuWeatherNOW.us@SD"
+    },
+    {
+     "name": "All Weddings WE tv",
+     "guideId": "plex.tv.All.Weddings.We.TV.plex",
+     "tvgId": "AllWeddingsWEtv.us@SD"
+    },
+    {
+     "name": "Anger Management Channel",
+     "guideId": "plex.tv.Anger.Management.plex",
+     "tvgId": "AngerManagementChannel.us@SD"
+    },
+    {
+     "name": "Antiques Road Trip",
+     "guideId": "plex.tv.Antiques.Road.Trip.plex",
+     "tvgId": "AntiquesRoadTrip.us@SD"
+    },
+    {
+     "name": "Antiques Roadshow UK",
+     "guideId": "plex.tv.Antiques.Roadshow.UK.plex",
+     "tvgId": "AntiquesRoadshowUK.us@SD"
+    },
+    {
+     "name": "Are We There Yet?",
+     "guideId": "plex.tv.Are.We.There.Yet?.plex",
+     "tvgId": "AreWeThereYet.us@SD"
+    },
+    {
+     "name": "Baby Shark TV",
+     "guideId": "plex.tv.BABY.SHARK.TV.plex",
+     "tvgId": "BabySharkTV.us@SD"
+    },
+    {
+     "name": "BBC Earth US",
+     "guideId": "plex.tv.BBC.Earth.plex",
+     "tvgId": "BBCEarth.uk@US"
+    },
+    {
+     "name": "beIN SPORTS XTRA",
+     "guideId": "plex.tv.beIN.SPORTS.XTRA.plex",
+     "tvgId": "beINSPORTSXTRA.us@SD"
+    },
+    {
+     "name": "Bloomberg Originals",
+     "guideId": "plex.tv.Bloomberg.Originals.plex",
+     "tvgId": "BloombergOriginals.us@US"
+    },
+    {
+     "name": "Bounce XL",
+     "guideId": "plex.tv.Bounce.XL.plex",
+     "tvgId": "BounceXL.us@SD"
+    },
+    {
+     "name": "BritBox Mysteries",
+     "guideId": "plex.tv.BritBox.Mysteries.plex",
+     "tvgId": "BritBoxMysteries.us@SD"
+    },
+    {
+     "name": "Celebrity Name Game",
+     "guideId": "plex.tv.Celebrity.Name.Game.plex",
+     "tvgId": "CelebrityNameGame.us@SD"
+    },
+    {
+     "name": "Cinevault Westerns",
+     "guideId": "plex.tv.CINEVAULT:.Westerns.plex",
+     "tvgId": "CinevaultWesterns.us@SD"
+    },
+    {
+     "name": "CNN Originals",
+     "guideId": "plex.tv.CNN.Originals.plex",
+     "tvgId": "CNNOriginals.us@SD"
+    },
+    {
+     "name": "Dark Matter TV",
+     "guideId": "plex.tv.Dark.Matter.TV.plex",
+     "tvgId": "DarkMatterTV.us@SD"
+    },
+    {
+     "name": "Deal or No Deal",
+     "guideId": "plex.tv.Deal.Or.No.Deal.plex",
+     "tvgId": "DealorNoDeal.us@SD"
+    },
+    {
+     "name": "Designated Survivor",
+     "guideId": "plex.tv.Designated.Survivor.plex",
+     "tvgId": "DesignatedSurvivor.us@SD"
+    },
+    {
+     "name": "Dog the Bounty Hunter",
+     "guideId": "plex.tv.Dog.the.Bounty.Hunter.plex",
+     "tvgId": "DogtheBountyHunter.us@US"
+    },
+    {
+     "name": "Don't Tell The Bride",
+     "guideId": "plex.tv.Don`t.Tell.The.Bride.plex",
+     "tvgId": "DontTellTheBride.uk@SD"
+    },
+    {
+     "name": "Ebony TV by Lionsgate",
+     "guideId": "plex.tv.Ebony.TV.by.Lionsgate.plex",
+     "tvgId": "EbonyTVbyLionsgate.us@SD"
+    },
+    {
+     "name": "Electric Now",
+     "guideId": "plex.tv.Electric.Now.plex",
+     "tvgId": "ElectricNow.us@SD"
+    },
+    {
+     "name": "F1 Channel",
+     "guideId": "plex.tv.F1.Channel.plex",
+     "tvgId": "F1Channel.ie@US"
+    },
+    {
+     "name": "FailArmy",
+     "guideId": "plex.tv.FailArmy.plex",
+     "tvgId": "FailArmy.us@US"
+    },
+    {
+     "name": "Fear Factor",
+     "guideId": "plex.tv.Fear.Factor.plex",
+     "tvgId": "FearFactor.us@US"
+    },
+    {
+     "name": "FIFA+ United States",
+     "guideId": "plex.tv.FIFA+.plex",
+     "tvgId": "FIFAPlus.uk@UnitedStates"
+    },
+    {
+     "name": "Fox Weather",
+     "guideId": "plex.tv.FOX.Weather.plex",
+     "tvgId": "FoxWeather.us@SD"
+    },
+    {
+     "name": "GoTraveler",
+     "guideId": "plex.tv.GoTraveler.plex",
+     "tvgId": "GoTraveler.us@SD"
+    },
+    {
+     "name": "Grit Xtra",
+     "guideId": "plex.tv.Grit.Xtra.plex",
+     "tvgId": "GritXtra.us@SD"
+    },
+    {
+     "name": "Hallmark Movies & More",
+     "guideId": "plex.tv.Hallmark.Movies.&.More.plex",
+     "tvgId": "HallmarkMoviesMore.us@SD"
+    },
+    {
+     "name": "Hasbro Legends",
+     "guideId": "plex.tv.Hasbro.Legends.plex",
+     "tvgId": "HasbroLegends.us@SD"
+    },
+    {
+     "name": "Hi-YAH!",
+     "guideId": "plex.tv.Hi-YAH!.plex",
+     "tvgId": "HiYAH.us@SD"
+    },
+    {
+     "name": "History Hit",
+     "guideId": "plex.tv.History.Hit.plex",
+     "tvgId": "HistoryHit.uk@SD"
+    },
+    {
+     "name": "Impossible Quiz Show",
+     "guideId": "plex.tv.Impossible.-.Quiz.Show.plex",
+     "tvgId": "ImpossibleQuizShow.us@SD"
+    },
+    {
+     "name": "ION Plus",
+     "guideId": "plex.tv.ION.Plus.plex",
+     "tvgId": "IONPlus.us@East"
+    },
+    {
+     "name": "Johnny Carson TV",
+     "guideId": "plex.tv.Johnny.Carson.TV.plex",
+     "tvgId": "JohnnyCarsonTV.us@SD"
+    },
+    {
+     "name": "Judge Nosey",
+     "guideId": "plex.tv.Judge.Nosey.plex",
+     "tvgId": "JudgeNosey.us@US"
+    },
+    {
+     "name": "LiveNOW from FOX",
+     "guideId": "plex.tv.LiveNOW.from.FOX.plex",
+     "tvgId": "LiveNOWfromFOX.us@SD"
+    },
+    {
+     "name": "Love Pets",
+     "guideId": "plex.tv.Love.Pets.plex",
+     "tvgId": "LovePets.ca@US"
+    },
+    {
+     "name": "Made In Hollywood",
+     "guideId": "plex.tv.Made.In.Hollywood.plex",
+     "tvgId": "MadeInHollywood.us@SD"
+    },
+    {
+     "name": "Maverick Black Cinema",
+     "guideId": "plex.tv.Maverick.Black.Cinema.plex",
+     "tvgId": "MaverickBlackCinema.us@SD"
+    },
+    {
+     "name": "Midsomer Murders",
+     "guideId": "plex.tv.Midsomer.Murders.plex",
+     "tvgId": "MidsomerMurders.us@SD"
+    },
+    {
+     "name": "MovieSphere",
+     "guideId": "plex.tv.MOVIESPHERE.plex",
+     "tvgId": "MovieSphere.us@US"
+    },
+    {
+     "name": "MyTime Movie Network East",
+     "guideId": "plex.tv.MyTime.Movie.Network.plex",
+     "tvgId": "MyTimeMovieNetworkEast.us@SD"
+    },
+    {
+     "name": "NBC News NOW",
+     "guideId": "plex.tv.NBC.News.NOW.plex",
+     "tvgId": "NBCNewsNOW.us@SD"
+    },
+    {
+     "name": "Newsmax 2",
+     "guideId": "plex.tv.Newsmax2.plex",
+     "tvgId": "Newsmax2.us@SD"
+    },
+    {
+     "name": "Outside TV",
+     "guideId": "plex.tv.Outside.plex",
+     "tvgId": "OutsideTV.us@SD"
+    },
+    {
+     "name": "Overtime",
+     "guideId": "plex.tv.Overtime.plex",
+     "tvgId": "Overtime.us@SD"
+    },
+    {
+     "name": "Pac-12 Insider",
+     "guideId": "plex.tv.Pac-12.Insider.plex",
+     "tvgId": "Pac12Insider.us@SD"
+    },
+    {
+     "name": "PBS Antiques Roadshow",
+     "guideId": "plex.tv.PBS.Antiques.Roadshow.plex",
+     "tvgId": "PBSAntiquesRoadshow.us@SD"
+    },
+    {
+     "name": "PowerNation TV",
+     "guideId": "plex.tv.Powernation.plex",
+     "tvgId": "PowerNationTV.us@SD"
+    },
+    {
+     "name": "Real Wild",
+     "guideId": "plex.tv.Real.Wild.plex",
+     "tvgId": "RealWild.uk@SD"
+    },
+    {
+     "name": "Ryan and Friends",
+     "guideId": "plex.tv.Ryan.and.Friends.plex",
+     "tvgId": "RyanandFriends.us@SD"
+    },
+    {
+     "name": "SNL Vault",
+     "guideId": "plex.tv.SNL.Vault.plex",
+     "tvgId": "SNLVault.us@SD"
+    },
+    {
+     "name": "Stadium",
+     "guideId": "plex.tv.Stadium.plex",
+     "tvgId": "Stadium.us@SD"
+    },
+    {
+     "name": "Swerve Combat",
+     "guideId": "plex.tv.Swerve.Combat.plex",
+     "tvgId": "SwerveCombat.us@SD"
+    },
+    {
+     "name": "The Design Network",
+     "guideId": "plex.tv.The.Design.Network.plex",
+     "tvgId": "TheDesignNetwork.us@SD"
+    },
+    {
+     "name": "The Graham Norton Show",
+     "guideId": "plex.tv.The.Graham.Norton.Show.plex",
+     "tvgId": "TheGrahamNortonShow.uk@SD"
+    },
+    {
+     "name": "The Pet Collective",
+     "guideId": "plex.tv.The.Pet.Collective.plex",
+     "tvgId": "ThePetCollective.us@US"
+    },
+    {
+     "name": "This Old House",
+     "guideId": "plex.tv.This.Old.House.plex",
+     "tvgId": "ThisOldHouse.us@SD"
+    },
+    {
+     "name": "TMZ",
+     "guideId": "plex.tv.TMZ.plex",
+     "tvgId": "TMZ.us@SD"
+    },
+    {
+     "name": "ToonGoggles",
+     "guideId": "plex.tv.Toon.Goggles.plex",
+     "tvgId": "ToonGoggles.us@SD"
+    },
+    {
+     "name": "Tribeca Channel",
+     "guideId": "plex.tv.Tribeca.Channel.plex",
+     "tvgId": "TribecaChannel.us@SD"
+    },
+    {
+     "name": "True Crime Now",
+     "guideId": "plex.tv.True.Crime.Now.plex",
+     "tvgId": "TrueCrimeNow.us@SD"
+    },
+    {
+     "name": "USA TODAY",
+     "guideId": "plex.tv.USA.TODAY.plex",
+     "tvgId": "USATODAY.us@SD"
+    },
+    {
+     "name": "Wanted: Dead or Alive",
+     "guideId": "plex.tv.Wanted:.Dead.or.Alive.plex",
+     "tvgId": "WantedDeadorAlive.us@SD"
+    },
+    {
+     "name": "Waypoint TV",
+     "guideId": "plex.tv.Waypoint.TV.plex",
+     "tvgId": "WaypointTV.us@SD"
+    },
+    {
+     "name": "Wipeout Xtra",
+     "guideId": "plex.tv.WipeoutXtra.plex",
+     "tvgId": "WipeoutXtra.us@SD"
+    },
+    {
+     "name": "Wired2FishTV",
+     "guideId": "plex.tv.Wired2Fish.plex",
+     "tvgId": "Wired2FishTV.us@SD"
+    },
+    {
+     "name": "Yu-Gi-Oh!",
+     "guideId": "plex.tv.Yu-Gi-Oh!.plex",
+     "tvgId": "YuGiOh.us@SD"
+    }
+   ]
+  },
+  {
+   "id": "free-roku",
+   "name": "Free TV guide (Roku)",
+   "url": "https://i.mjh.nz/Roku/all.xml.gz",
+   "freeTv": true,
+   "channels": [
+    {
+     "name": "American Ninja Warrior",
+     "guideId": "eec9d131b4095083a23c485d804c8b2d",
+     "tvgId": "AmericanNinjaWarrior.us@SD"
+    },
+    {
+     "name": "Circle",
+     "guideId": "f208a84047865b16820dd7110ec2e17f",
+     "tvgId": "Circle.us@SD"
+    },
+    {
+     "name": "Cold Case Files",
+     "guideId": "a3b243e7a1ea5ac99bb3e5560721d1f6",
+     "tvgId": "ColdCaseFiles.us@SD"
+    },
+    {
+     "name": "Danger TV",
+     "guideId": "447d63b6da208bb796b69f0383c474a1",
+     "tvgId": "DangerTV.us@SD"
+    },
+    {
+     "name": "Dateline 24/7",
+     "guideId": "18c5f5feae8855baba4d1ccfd75be3db",
+     "tvgId": "Dateline247.us@SD"
+    },
+    {
+     "name": "Homeful US",
+     "guideId": "9c7a717f25a15b9997c6e3fd5f43a1a6",
+     "tvgId": "Homeful.ca@US"
+    },
+    {
+     "name": "NBC LX Home",
+     "guideId": "c37101187ab95eec8640657f6ae2a322",
+     "tvgId": "NBCLXHome.us@HD"
+    },
+    {
+     "name": "OAN Plus",
+     "guideId": "e29e205ea1fb529f996ad862a2d6724e",
+     "tvgId": "OANPlus.us@SD"
+    },
+    {
+     "name": "Super Simple Songs",
+     "guideId": "9aff620ece2457a3a7572886ecae0495",
+     "tvgId": "SuperSimpleSongs.us@SD"
+    },
+    {
+     "name": "Survivor",
+     "guideId": "38f074c80d4c0a6208a8c50257f41d0f",
+     "tvgId": "Survivor.us@SD"
+    }
+   ]
+  },
+  {
+   "id": "free-pluto",
+   "name": "Free TV guide (Pluto)",
+   "url": "https://i.mjh.nz/PlutoTV/us.xml.gz",
+   "freeTv": true,
+   "channels": [
+    {
+     "name": "Doctor Who Classic",
+     "guideId": "5ce4475cd43850831ca91ce7",
+     "tvgId": "DoctorWhoClassic.us@US"
+    },
+    {
+     "name": "Gordon Ramsay's Hell's Kitchen",
+     "guideId": "5b4e99f4423e067bd6df6903",
+     "tvgId": "GordonRamsaysHellsKitchen.us@SD"
+    }
+   ]
+  },
+  {
+   "id": "free-samsung",
+   "name": "Free TV guide (Samsung TV Plus)",
+   "url": "https://i.mjh.nz/SamsungTVPlus/us.xml.gz",
+   "freeTv": true,
+   "channels": [
+    {
+     "name": "Dry Bar Comedy+",
+     "guideId": "USAJ30000039U",
+     "tvgId": "DryBarComedyPlus.us@SD"
+    },
+    {
+     "name": "Hungry",
+     "guideId": "USAJ2200009C2",
+     "tvgId": "Hungry.us@SD"
+    },
+    {
+     "name": "Mr Bean Animated",
+     "guideId": "US170002608",
+     "tvgId": "MrBeanAnimated.uk@English"
+    },
+    {
+     "name": "Samsung Wildlife",
+     "guideId": "USBA3000043LH",
+     "tvgId": "SamsungWildlife.us@SD"
+    }
+   ]
+  }
+ ]
+}

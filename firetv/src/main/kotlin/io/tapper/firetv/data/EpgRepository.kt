@@ -42,6 +42,23 @@ class EpgRepository(
         private const val KEEP_BEFORE_MS = 6 * 60 * 60 * 1000L
         private const val KEEP_AFTER_MS = 72 * 60 * 60 * 1000L
         private const val MAX_ROWS = 400_000
+
+        /**
+         * Rows from the GarysTV guide files (see GarysTvFeed) are kept under
+         * their own id rather than any one source's, and read alongside
+         * whichever sources are on screen. Two ids: with the Free TV channels
+         * (whenever Free TV or the iptv-org playlist, which carries the same
+         * tvg-ids, is in use) and without, so turning Free TV on finds a guide
+         * that has never been fetched and downloads it straight away.
+         */
+        const val GARYS_GUIDES_ID = "garystv-guides"
+        const val GARYS_GUIDES_FREE_ID = "garystv-guides-free"
+        fun garysGuidesId(withFreeTv: Boolean) = if (withFreeTv) GARYS_GUIDES_FREE_ID else GARYS_GUIDES_ID
+
+        /** Whether the Free TV channels' listings are wanted: Free TV is in
+         *  use, or the iptv-org playlist, whose channels share their tvg-ids. */
+        fun usesFreeTvGuide(sources: List<TvSource>) =
+            sources.any { it.kind == TvSource.Kind.FREE || it.id == TvSource.BUILTIN.id }
     }
 
     data class Result(val programmes: Int, val channels: Int, val source: String)
@@ -87,6 +104,57 @@ class EpgRepository(
             }
             try {
                 refreshNow(source, declared, progress)
+            } finally {
+                runCatching { android.os.Process.setThreadPriority(previous) }
+            }
+        }
+
+    /**
+     * Downloads the GarysTV guide files and keeps only the channels they
+     * list. A Free TV channel's listings are stored under its tvg-id, so they
+     * match that channel in Free TV and in the iptv-org playlist alike; a
+     * name-matched channel's under the file's own id (see
+     * GarysTvFeed.nameMatches). One file failing leaves the others' rows.
+     */
+    suspend fun refreshGarysGuides(feed: GarysTvFeed, withFreeTv: Boolean): kotlin.Result<Result> =
+        withContext(Dispatchers.IO) {
+            val previous = runCatching {
+                android.os.Process.getThreadPriority(android.os.Process.myTid())
+            }.getOrDefault(android.os.Process.THREAD_PRIORITY_DEFAULT)
+            runCatching {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            }
+            try {
+                runCatching {
+                    val files = feed.guides(allowNetwork = true)
+                        .map { f -> if (withFreeTv) f else f.copy(channels = f.channels.filter { it.tvgId == null }) }
+                        .filter { it.channels.isNotEmpty() }
+                    val rows = ArrayList<EpgDatabase.Programme>()
+                    var fetched = 0
+                    var lastError: Throwable? = null
+                    for (f in files) {
+                        // The file's channel id -> the id(s) its rows are stored under.
+                        val targets = HashMap<String, MutableList<String>>()
+                        for (c in f.channels) {
+                            targets.getOrPut(EpgDatabase.normalizeId(c.guideId)) { ArrayList() }
+                                .add(EpgDatabase.normalizeId(c.tvgId ?: c.guideId))
+                        }
+                        runCatching {
+                            open(f.url).use { input ->
+                                parseStreaming(input) { p ->
+                                    targets[EpgDatabase.normalizeId(p.channelId)]?.forEach { t ->
+                                        rows.add(p.copy(channelId = t))
+                                    }
+                                }
+                            }
+                        }.onSuccess { fetched++ }.onFailure { lastError = it }
+                    }
+                    if (fetched == 0 && files.isNotEmpty()) {
+                        throw lastError ?: IllegalStateException("No GarysTV guide could be downloaded.")
+                    }
+                    db.replaceAll(garysGuidesId(withFreeTv), rows)
+                    Result(rows.size, rows.mapTo(HashSet()) { it.channelId }.size, "GarysTV guides")
+                }
             } finally {
                 runCatching { android.os.Process.setThreadPriority(previous) }
             }

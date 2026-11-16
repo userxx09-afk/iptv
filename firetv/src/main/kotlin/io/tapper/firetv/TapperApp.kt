@@ -32,6 +32,7 @@ class TapperApp : Application() {
     lateinit var sourceStore: SourceStore; private set
     lateinit var favorites: FavoritesStore; private set
     lateinit var repository: PlaylistRepository; private set
+    lateinit var garysFeed: io.tapper.firetv.data.GarysTvFeed; private set
     lateinit var epgDb: EpgDatabase; private set
     lateinit var epg: EpgRepository; private set
     lateinit var epgOverrides: EpgOverrideStore; private set
@@ -116,7 +117,8 @@ class TapperApp : Application() {
         vault = CredentialVault(this)
         sourceStore = SourceStore(this)
         favorites = FavoritesStore(this)
-        repository = PlaylistRepository(cacheDir, vault, onWarning = { msg -> logEvent("CATALOGUE", msg) })
+        garysFeed = io.tapper.firetv.data.GarysTvFeed(cacheDir, assets)
+        repository = PlaylistRepository(cacheDir, vault, garysFeed, onWarning = { msg -> logEvent("CATALOGUE", msg) })
         epgDb = EpgDatabase(this)
         supplementalEpg = SupplementalEpgStore(this)
         epg = EpgRepository(epgDb, vault, supplementalEpg)
