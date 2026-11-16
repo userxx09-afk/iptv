@@ -51,6 +51,9 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     sources: List<TvSource>,
     activeId: String,
+    /** Sources whose live channels are shown with the active one's. */
+    alongsideIds: Set<String>,
+    onSetAlongside: (TvSource, Boolean) -> Unit,
     guideSummary: String,
     onSwitchSource: (TvSource) -> Unit,
     onAddSource: () -> Unit,
@@ -199,6 +202,7 @@ fun SettingsScreen(
 
         sources.forEach { s ->
             val isActive = s.id == activeId
+            val isAlongside = !isActive && s.id in alongsideIds
             Column(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp)
                     .clip(RoundedCornerShape(10.dp))
@@ -210,14 +214,19 @@ fun SettingsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            s.name + if (isActive) "   (active)" else "",
+                            s.name + when {
+                                isActive -> "   (active)"
+                                isAlongside -> "   (shown alongside)"
+                                else -> ""
+                            },
                             style = MaterialTheme.typography.titleMedium, color = Ink,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                         // Host only. The full Xtream URL carries the username and
                         // password, which must never be rendered on screen.
                         Text(
-                            s.kind.name + "  ·  " + hostOnly(s.location),
+                            if (s.kind == TvSource.Kind.FREE) "About 140 free US channels, with guide listings (from GarysTV)"
+                            else s.kind.name + "  ·  " + hostOnly(s.location),
                             style = MaterialTheme.typography.bodyMedium, color = Dim,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
@@ -234,7 +243,15 @@ fun SettingsScreen(
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (!isActive) Chip("Use this", false) { onSwitchSource(s) }
-                    Chip("Guide URL", editing == s.id) {
+                    // Its live channels join the active source's lineup and
+                    // guide, so free channels sit next to a paid plan's.
+                    if (!isActive) {
+                        Chip(if (isAlongside) "Shown alongside: on" else "Show alongside", isAlongside) {
+                            onSetAlongside(s, !isAlongside)
+                        }
+                    }
+                    // Free TV's listings come from the GarysTV guide files.
+                    if (s.kind != TvSource.Kind.FREE) Chip("Guide URL", editing == s.id) {
                         editing = if (editing == s.id) null else s.id
                         epgDraft = s.epgUrlOverride.orEmpty()
                     }

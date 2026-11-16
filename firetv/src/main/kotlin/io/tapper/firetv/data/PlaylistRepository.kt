@@ -25,6 +25,8 @@ import java.util.zip.GZIPInputStream
 class PlaylistRepository(
     private val cacheDir: File,
     private val vault: CredentialVault,
+    /** Where the Free TV lineup comes from. */
+    private val freeTv: GarysTvFeed,
     /** A category/country lookup that failed without taking the rest of the
      *  load down with it - see XtreamClient.liveChannels's onWarning doc.
      *  Not thrown, since the caller already has a perfectly usable (if
@@ -124,9 +126,34 @@ class PlaylistRepository(
                 when (source.kind) {
                     TvSource.Kind.M3U -> loadM3u(source, forceRefresh)
                     TvSource.Kind.XTREAM -> loadXtream(source, forceRefresh, onUpdate)
+                    TvSource.Kind.FREE -> index(source.id, freeTv.lineup(source.id, forceRefresh), emptyList(), fromCache = false)
                 }
             }
         }
+
+    /**
+     * [primary] with the live channels of the sources shown alongside it
+     * added to its Live TV lineup. Their categories are prefixed with the
+     * source's name ("Free TV · News") so they stay told apart from the
+     * primary's own; movies and series stay the primary's alone. Each
+     * channel keeps its own sourceId, so playback, favourites and guide
+     * overrides work as they do in that source on its own.
+     */
+    fun withAlongside(primary: Catalogue, alongside: List<Pair<TvSource, Catalogue>>): Catalogue {
+        if (alongside.isEmpty()) return primary
+        val extra = alongside.flatMap { (src, cat) ->
+            cat.channels.filter { it.kind == ContentKind.LIVE }.map { c ->
+                val cats = c.categories.ifEmpty { listOfNotNull(c.group) }.ifEmpty { listOf("All channels") }
+                c.copy(group = src.name + " · " + cats.first(), categories = cats.map { src.name + " · " + it })
+            }
+        }
+        val seen = primary.channels.mapTo(HashSet()) { it.id }
+        val combined = primary.channels + extra.filter { seen.add(it.id) }
+        return index(
+            primary.sourceId, combined, primary.declaredEpgUrls, primary.fromCache,
+            reuseSectionsFrom = primary, recomputeOnly = setOf(ContentKind.LIVE),
+        ).copy(attemptedKinds = primary.attemptedKinds, sectionErrors = primary.sectionErrors)
+    }
 
     private fun cacheFile(sourceId: String) = File(cacheDir, "$sourceId.m3u")
 

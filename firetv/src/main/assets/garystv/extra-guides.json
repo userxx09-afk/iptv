@@ -1,0 +1,23 @@
+{
+  "about": "Guide listings for channels your provider's own guide leaves out. THE ONE PLACE to add one: put its XMLTV link under guides (or add a channel to a guide already here), then push; every GarysTV picks it up at its next update. 'guideId' is the <channel id> in that XMLTV file; 'match' are words in your channel's name (any of them, ignoring case and punctuation) and 'except' words that rule a channel out. Only the listed channels are kept from each file, so a big file costs a download, not guide space.",
+  "guides": [
+    {
+      "id": "epgshare-us2",
+      "name": "Extra guide (epgshare01 US2)",
+      "url": "https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz",
+      "channels": [
+        {
+          "name": "Marquee Sports Network",
+          "guideId": "Marquee.Sports.Network.HD.us2",
+          "match": ["marquee sports network", "marquee sports"],
+          "except": ["overflow", "alt"]
+        },
+        {
+          "name": "Marquee Sports Network Overflow",
+          "guideId": "Marquee.Sports.Network.Overflow.us2",
+          "match": ["marquee sports network overflow", "marquee overflow", "marquee sports alt"]
+        }
+      ]
+    }
+  ]
+}

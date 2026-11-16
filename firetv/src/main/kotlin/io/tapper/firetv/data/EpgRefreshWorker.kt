@@ -71,12 +71,26 @@ class EpgRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWo
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val app = applicationContext as TapperApp
         val source = app.sourceStore.active()
+        // The active source plus any shown alongside it: each keeps its own
+        // guide, and the GarysTV guide files have theirs (see EpgRepository).
+        val inUse = listOf(source) + app.sourceStore.alongside(source)
         runCatching {
-            // Fetched recently already (the app was opened, or the last run
-            // was a while ago but the guide is still current): nothing to do.
-            val age = System.currentTimeMillis() - app.epgDb.fetchedAt(source.id)
-            if (age < SKIP_IF_NEWER_MS && app.epgDb.countFor(source.id) > 0) return@runCatching
-            app.epg.refresh(source, declaredUrls(app, source)).getOrThrow()
+            val withFree = EpgRepository.usesFreeTvGuide(inUse)
+            val garysId = EpgRepository.garysGuidesId(withFree)
+            if (System.currentTimeMillis() - app.epgDb.fetchedAt(garysId) >= SKIP_IF_NEWER_MS) {
+                app.epg.refreshGarysGuides(app.garysFeed, withFree)
+            }
+            var primaryError: Throwable? = null
+            for (s in inUse) {
+                if (s.kind == TvSource.Kind.FREE) continue // no guide of its own
+                // Fetched recently already (the app was opened, or the last run
+                // was a while ago but the guide is still current): nothing to do.
+                val age = System.currentTimeMillis() - app.epgDb.fetchedAt(s.id)
+                if (age < SKIP_IF_NEWER_MS && app.epgDb.countFor(s.id) > 0) continue
+                val r = app.epg.refresh(s, declaredUrls(app, s))
+                if (s.id == source.id) primaryError = r.exceptionOrNull()
+            }
+            primaryError?.let { throw it }
             Unit
         }.fold(
             onSuccess = { Result.success() },

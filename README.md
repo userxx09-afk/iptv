@@ -43,6 +43,28 @@ Maven access in the authoring environment. The parsing logic is verified against
 the real 13,510-entry playlist, but the Android and Compose code has never been
 compiled. Expect the first CI run to surface import or API-signature fixes.
 
+## Free TV and showing two sources at once
+
+- **Free TV** is a built-in source: GarysTV's lineup of about 140 US channels
+  streamed openly by their owners or licensed free services (Tubi, Xumo,
+  Stirr, Samsung TV Plus...). The app reads it from the public GarysTV repo
+  (`src/core/sources/free-channels.json`), so a channel GarysTV adds shows up
+  here within a day with no new build. A copy is bundled in
+  `firetv/src/main/assets/garystv` for a first launch without internet.
+- **Show alongside**: in Settings, any source other than the active one has a
+  "Show alongside" button. Its live channels then join the active source's
+  lineup and guide, under categories named after it ("Free TV · News").
+  Free TV is shown alongside by default.
+- **Guides**: the same extra guide files GarysTV uses
+  (`src/core/guide/free-guides.json` and `extra-guides.json`: epgshare01 and
+  i.mjh.nz copies of the Plex, Roku, Pluto, Samsung TV Plus and DistroTV
+  schedules) are downloaded every 12 hours, keeping only the channels they
+  list. The Free TV ones are only fetched while Free TV or the iptv-org
+  playlist is in use. Each source's guide is stored under its own id and
+  the guide screens read all the ones in use (see `EpgDatabase`).
+- To refresh the bundled copies: copy those three files from a GarysTV
+  checkout into `firetv/src/main/assets/garystv`.
+
 ## Cloud sync setup (Sign in with Google / Microsoft)
 
 Settings > Shared watch history (Fire TV) and Settings > Sync (iPad) can sign
