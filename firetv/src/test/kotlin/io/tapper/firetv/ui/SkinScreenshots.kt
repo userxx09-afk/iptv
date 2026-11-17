@@ -32,6 +32,7 @@ import io.tapper.firetv.ui.theme.Skin
 import io.tapper.firetv.ui.theme.TapperTheme
 import io.tapper.firetv.ui.theme.UiSkin
 import io.tapper.firetv.ui.theme.skinBackground
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -59,7 +60,11 @@ class SkinScreenshots {
 
     private fun shot(skin: Skin, name: String) {
         UiSkin.choose(RuntimeEnvironment.getApplication(), skin)
+        // D-pad mode, as on a Fire TV, so the first channel row can take focus.
+        InstrumentationRegistry.getInstrumentation().setInTouchMode(false)
         compose.setContent { TapperTheme { SampleBrowse() } }
+        compose.waitForIdle()
+        compose.runOnIdle { runCatching { sampleFocus?.requestFocus() } }
         compose.waitForIdle()
         compose.onRoot().captureRoboImage(
             "build/skin-shots/$name.png",
@@ -67,6 +72,8 @@ class SkinScreenshots {
         )
     }
 }
+
+private var sampleFocus: FocusRequester? = null
 
 private val source = TvSource(id = "s1", name = "Free TV", kind = TvSource.Kind.FREE, location = "")
 
@@ -96,6 +103,7 @@ private fun SampleBrowse() {
         EpgDatabase.Programme("c2", slot + 2 * hour, slot + 3 * hour, "Tracker", null),
     )
     val focus = remember { FocusRequester() }
+    sampleFocus = focus
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
 
     Row(Modifier.fillMaxSize().skinBackground().padding(horizontal = 48.dp, vertical = 27.dp)) {

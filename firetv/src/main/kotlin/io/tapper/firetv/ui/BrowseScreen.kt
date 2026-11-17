@@ -1659,7 +1659,7 @@ internal fun SourceHeader(source: TvSource, epgStatus: String?, onClick: () -> U
         }
         if (isGarysSkin) {
             // GarysTV's top-left brand: the round logo in a red ring, then
-            // GARY'S TV with the TV in red, and the clock on the right.
+            // GARY'S TV with the TV in red.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Image(
                     painter = painterResource(R.drawable.garys_logo),
@@ -1672,15 +1672,13 @@ internal fun SourceHeader(source: TvSource, epgStatus: String?, onClick: () -> U
                 Text("GARY'S", style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.ExtraBold, color = Ink)
                 Text(" TV", style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold, color = Accent, modifier = Modifier.weight(1f))
-                Text(clock, style = MaterialTheme.typography.bodyMedium, color = Ink)
+                    fontWeight = FontWeight.ExtraBold, color = Accent)
             }
-            Spacer(Modifier.height(6.dp))
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("SOURCE", style = MaterialTheme.typography.bodyMedium, color = Dim, modifier = Modifier.weight(1f))
-                Text(clock, style = MaterialTheme.typography.bodyMedium, color = Ink)
-            }
+            Spacer(Modifier.height(10.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("SOURCE", style = MaterialTheme.typography.bodyMedium, color = Dim, modifier = Modifier.weight(1f))
+            Text(clock, style = MaterialTheme.typography.bodyMedium, color = Ink)
         }
         Text(source.name, style = MaterialTheme.typography.titleMedium, color = Ink,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
