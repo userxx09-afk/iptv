@@ -177,6 +177,20 @@ fun ProgrammePanel(
     menu?.invoke()
 }
 
+/** "" for today, otherwise "Yesterday " / "Tomorrow " / "Thu 19 ". */
+internal fun dayPrefix(utcMs: Long): String {
+    val cal = java.util.Calendar.getInstance()
+    val today = cal.get(java.util.Calendar.YEAR) * 1000 + cal.get(java.util.Calendar.DAY_OF_YEAR)
+    cal.timeInMillis = utcMs
+    val day = cal.get(java.util.Calendar.YEAR) * 1000 + cal.get(java.util.Calendar.DAY_OF_YEAR)
+    return when (day - today) {
+        0 -> ""
+        -1 -> "Yesterday "
+        1 -> "Tomorrow "
+        else -> SimpleDateFormat("EEE d ", Locale.getDefault()).format(Date(utcMs))
+    }
+}
+
 @Composable
 private fun ScheduleRow(
     programme: EpgDatabase.Programme,
@@ -208,7 +222,8 @@ private fun ScheduleRow(
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Text(
-            fmt.format(Date(programme.startUtc)) +
+            dayPrefix(programme.startUtc) + fmt.format(Date(programme.startUtc)) +
+                "–" + fmt.format(Date(programme.endUtc)) +
                 (if (live) "   ON NOW" else "") +
                 (if (archived) "   ▶ CATCH-UP" else ""),
             style = MaterialTheme.typography.bodyMedium,

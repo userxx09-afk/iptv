@@ -1607,6 +1607,14 @@ fun BrowseScreen(
     menu?.invoke()
 }
 
+/** "Tue 17 Nov  14:05", in the device's locale and 12/24-hour setting. */
+internal fun clockText(): String {
+    val now = java.util.Date()
+    val day = java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.getDefault()).format(now)
+    val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(now)
+    return "$day  $time"
+}
+
 @Composable
 private fun SourceHeader(source: TvSource, epgStatus: String?, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
@@ -1618,7 +1626,16 @@ private fun SourceHeader(source: TvSource, epgStatus: String?, onClick: () -> Un
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        Text("SOURCE", style = MaterialTheme.typography.bodyMedium, color = Dim)
+        // The clock lives here, top left, where the eye starts: a TV app is
+        // often the only screen in the room showing the time.
+        var clock by remember { mutableStateOf(clockText()) }
+        LaunchedEffect(Unit) {
+            while (true) { delay(10_000); clock = clockText() }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("SOURCE", style = MaterialTheme.typography.bodyMedium, color = Dim, modifier = Modifier.weight(1f))
+            Text(clock, style = MaterialTheme.typography.bodyMedium, color = Ink)
+        }
         Text(source.name, style = MaterialTheme.typography.titleMedium, color = Ink,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
         epgStatus?.let {

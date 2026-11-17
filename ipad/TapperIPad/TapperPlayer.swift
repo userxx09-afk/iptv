@@ -148,6 +148,36 @@ final class TapperPlayer: ObservableObject {
         }
     }
 
+    /// One line about the stream: picture size, current bitrate, and how far
+    /// behind live it is. Blank before the first frame.
+    func streamInfo() -> String {
+        guard let item = player?.currentItem else { return "" }
+        var parts: [String] = []
+        let size = item.presentationSize
+        if size.height > 0 { parts.append("\(Int(size.width))×\(Int(size.height))") }
+        if let event = item.accessLog()?.events.last, event.indicatedBitrate > 0 {
+            parts.append(String(format: "%.1f Mbps", event.indicatedBitrate / 1_000_000))
+        }
+        if let behind = behindLiveSeconds() { parts.append("\(Int(behind))s behind live") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Seconds behind the live edge, when that's known and over 15; nil otherwise.
+    func behindLiveSeconds() -> Double? {
+        guard let item = player?.currentItem,
+              item.duration.isIndefinite,
+              let range = item.seekableTimeRanges.last?.timeRangeValue else { return nil }
+        let behind = CMTimeGetSeconds(CMTimeRangeGetEnd(range)) - CMTimeGetSeconds(item.currentTime())
+        return behind.isFinite && behind > 15 ? behind : nil
+    }
+
+    /// Back to the live edge.
+    func jumpToLive() {
+        guard let item = player?.currentItem,
+              let range = item.seekableTimeRanges.last?.timeRangeValue else { return }
+        player?.seek(to: CMTimeRangeGetEnd(range))
+    }
+
     func endMute() {
         muteTask?.cancel()
         muteTask = nil

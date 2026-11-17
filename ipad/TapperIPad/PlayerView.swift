@@ -259,6 +259,21 @@ struct PlayerView: View {
                     Text(current.name)
                         .font(.title3.bold())
                         .lineLimit(1)
+                    TimelineView(.periodic(from: .now, by: 2)) { context in
+                        HStack(spacing: 10) {
+                            Text(context.date.formatted(date: .omitted, time: .shortened))
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                            Text(controller.streamInfo())
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.7))
+                            if controller.behindLiveSeconds() != nil {
+                                Button("Jump to live") { controller.jumpToLive() }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.bordered)
+                                    .tint(.white)
+                            }
+                        }
+                    }
                     Text(controller.markerSummary.isEmpty ? "Ad markers: none seen" : controller.markerSummary)
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.55))

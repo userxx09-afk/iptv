@@ -6,6 +6,15 @@ private func clock(_ date: Date) -> String {
     date.formatted(date: .omitted, time: .shortened)
 }
 
+/// "" for today, otherwise "Yesterday", "Tomorrow" or "Thu 19".
+private func dayLabel(_ date: Date) -> String {
+    let cal = Calendar.current
+    if cal.isDateInToday(date) { return "" }
+    if cal.isDateInYesterday(date) { return "Yesterday" }
+    if cal.isDateInTomorrow(date) { return "Tomorrow" }
+    return date.formatted(.dateTime.weekday(.abbreviated).day())
+}
+
 /// A live channel's row: its name, and underneath what is on right now with
 /// how far through it is - the same line Fire TV shows on every channel.
 /// Falls back to the channel's group when the guide has nothing for it.
@@ -159,10 +168,19 @@ struct ChannelGuideView: View {
         let archived = (airing || past) && CatchupUrl.shared.canPlay(
             channel: channel, startUtcMs: Int64(programme.start) * 1000, nowUtcMs: Int64(nowSeconds) * 1000)
         return HStack(alignment: .top, spacing: 14) {
-            Text(clock(programme.startDate))
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(airing ? Color.blue : Color.secondary)
-                .frame(width: 76, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                let day = dayLabel(programme.startDate)
+                if !day.isEmpty {
+                    Text(day).font(.caption2).foregroundStyle(.secondary)
+                }
+                Text(clock(programme.startDate))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(airing ? Color.blue : Color.secondary)
+                Text(clock(programme.endDate))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 76, alignment: .leading)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text(programme.title)
