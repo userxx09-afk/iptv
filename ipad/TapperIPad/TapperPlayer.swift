@@ -110,6 +110,14 @@ final class TapperPlayer: ObservableObject {
         return true
     }
 
+    /// False for a multiview tile without the sound.
+    private(set) var audible = true
+
+    func setAudible(_ on: Bool) {
+        audible = on
+        player?.isMuted = !on || muteEndsAt != nil
+    }
+
     /// Whether captions are on - mirrors the setting so the overlay button
     /// redraws when it changes.
     @Published private(set) var captionsOn = PlayerSettingsStore.shared.captions
@@ -182,7 +190,7 @@ final class TapperPlayer: ObservableObject {
         muteTask?.cancel()
         muteTask = nil
         muteEndsAt = nil
-        player?.isMuted = false
+        player?.isMuted = !audible
     }
 
     private func noteDateRanges(_ labels: [String]) {
@@ -303,7 +311,7 @@ final class TapperPlayer: ObservableObject {
 
         let avPlayer = player ?? AVPlayer()
         // A mute in progress carries over a reconnect.
-        avPlayer.isMuted = muteEndsAt != nil
+        avPlayer.isMuted = muteEndsAt != nil || !audible
         avPlayer.replaceCurrentItem(with: item)
         if player == nil { player = avPlayer }
 

@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
         data class EpgPick(val channel: Channel) : Screen
         data object Recordings : Screen
         data object Teams : Screen
+        data object Multiview : Screen
     }
 
     // allLiveChannels feeds the in-player guide's category browsing
@@ -271,6 +272,8 @@ class MainActivity : ComponentActivity() {
             var watchRevision by remember { mutableIntStateOf(0) }
             var bufferSize by remember { mutableStateOf(app.playerSettings.bufferSize) }
             var captionsOn by remember { mutableStateOf(app.playerSettings.captions) }
+            // Channels picked for multiview (Browse > long-press > Add to multiview).
+            var multiview by remember { mutableStateOf<List<Channel>>(emptyList()) }
             var preferredLanguage by remember { mutableStateOf(app.playerSettings.preferredLanguage) }
             var muteMinutes by remember { mutableStateOf(app.playerSettings.muteMinutes) }
             var cacheHours by remember { mutableStateOf(app.playerSettings.cacheHours) }
@@ -1270,8 +1273,39 @@ class MainActivity : ComponentActivity() {
                         },
                         onOpenRecordings = { refreshRecordings(); push(Screen.Recordings) },
                         onOpenTeams = { push(Screen.Teams) },
+                        multiviewCount = multiview.size,
+                        onAddToMultiview = { ch ->
+                            val max = io.tapper.firetv.ui.multiviewTiles(this@MainActivity)
+                            when {
+                                multiview.any { it.id == ch.id && it.sourceId == ch.sourceId } ->
+                                    Toast.makeText(this@MainActivity, "${ch.name} is already in multiview", Toast.LENGTH_SHORT).show()
+                                multiview.size >= max ->
+                                    Toast.makeText(this@MainActivity, "Multiview holds $max channels on this device", Toast.LENGTH_LONG).show()
+                                else -> {
+                                    multiview = multiview + ch
+                                    if (multiview.size >= 2) {
+                                        stopPlayback()
+                                        push(Screen.Multiview)
+                                    } else {
+                                        Toast.makeText(this@MainActivity, "Added ${ch.name}. Long-press another channel and choose Add to multiview.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        },
+                        onOpenMultiview = { stopPlayback(); push(Screen.Multiview) },
                     )
                     }
+
+                    current is Screen.Multiview -> io.tapper.firetv.ui.MultiviewScreen(
+                        initial = multiview,
+                        allChannels = catalogue?.section(ContentKind.LIVE)?.items.orEmpty(),
+                        onFullScreen = { ch ->
+                            pop()
+                            startPlayback(Playing(listOf(ch), 0))
+                        },
+                        onChanged = { multiview = it },
+                        onExit = { pop() },
+                    )
 
                     current is Screen.Teams && catalogue != null -> TeamsScreen(
                         store = app.teams,

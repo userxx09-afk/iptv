@@ -227,6 +227,7 @@ struct PlayerView: View {
             HStack(spacing: 6) {
                 closeButton
                 Spacer()
+                pauseButton
                 captionsButton
                 muteButton
                 AirPlayButton()
@@ -350,6 +351,22 @@ struct PlayerView: View {
                 .background(.black.opacity(0.45))
                 .clipShape(Capsule())
         }
+    }
+
+    /// Pause live TV and carry on from the same moment (as far back as the
+    /// stream keeps); Jump to live catches up.
+    private var pauseButton: some View {
+        let paused = controller.player?.timeControlStatus == .paused
+        return Button {
+            if paused { controller.player?.play() } else { controller.player?.pause() }
+            scheduleHide()
+        } label: {
+            Image(systemName: paused ? "play.fill" : "pause.fill")
+                .font(.title3)
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel(paused ? "Play" : "Pause")
     }
 
     /// Closed captions on or off, for this and every later stream.
@@ -518,7 +535,7 @@ struct PlayerView: View {
 
 /// A bare AVPlayerLayer, with none of AVKit's own controls - the live overlay
 /// above replaces them.
-private struct PlayerLayerView: UIViewRepresentable {
+struct PlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
 
     final class Container: UIView {
