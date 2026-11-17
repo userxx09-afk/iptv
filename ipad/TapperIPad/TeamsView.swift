@@ -215,8 +215,8 @@ struct TeamsView: View {
                 let from = Int(g.startUtc / 1000) - 2 * 3600
                 let rows = EpgDatabase.shared.startingBetween(source, from: from, to: Int(g.startUtc / 1000) + 75 * 60)
                 let listings = rows.mapValues { list in
-                    list.map { Listing(startUtc: Int64($0.start) * 1000, endUtc: Int64($0.end) * 1000,
-                                       title: $0.title, description: $0.description) }
+                    list.map { SportsBridge.shared.listing(startUtc: Int64($0.start) * 1000, endUtc: Int64($0.end) * 1000,
+                                                           title: $0.title) }
                 }
                 let hits = ChannelMatcher.shared.matchChannels(game: g, channels: live, epgIds: epgIds, listings: listings)
                 return MatchedGame(game: g, hits: hits)

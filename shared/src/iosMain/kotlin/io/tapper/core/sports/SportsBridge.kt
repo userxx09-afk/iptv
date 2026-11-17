@@ -18,6 +18,10 @@ object SportsBridge {
     /** Every league, in the order Fire TV lists them. */
     fun leagues(): List<League> = League.entries.toList()
 
+    /** A guide listing, built here so Swift needn't name Listing's `description`
+     *  (Kotlin/Native renames that parameter to avoid NSObject's). */
+    fun listing(startUtc: Long, endUtc: Long, title: String): Listing = Listing(startUtc, endUtc, title, null)
+
     fun leagueNamed(name: String): League? = League.entries.firstOrNull { it.name == name }
 
     fun teams(league: League, nowUtcMs: Long, onResult: (List<Team>?, String?) -> Unit) {
