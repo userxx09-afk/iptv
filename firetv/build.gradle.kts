@@ -71,7 +71,7 @@ android {
         // to the constant.
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 33
         // Bump this by hand when features change.
-        versionName = "2.0.0"
+        versionName = "2.1.0"
         buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${oauthSetting("GOOGLE_OAUTH_CLIENT_ID")}\"")
         buildConfigField("String", "GOOGLE_OAUTH_CLIENT_SECRET", "\"${oauthSetting("GOOGLE_OAUTH_CLIENT_SECRET")}\"")
         buildConfigField("String", "MICROSOFT_OAUTH_CLIENT_ID", "\"${oauthSetting("MICROSOFT_OAUTH_CLIENT_ID")}\"")

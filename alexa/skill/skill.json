@@ -1,0 +1,32 @@
+{
+  "manifest": {
+    "publishingInformation": {
+      "locales": {
+        "en-US": {
+          "name": "Tapper",
+          "summary": "Control Tapper IPTV on your Fire TV by voice.",
+          "description": "Play a channel by name or number, change channel, pause, resume and stop Tapper IPTV on a linked Fire TV.",
+          "examplePhrases": [
+            "Alexa, ask Tapper to play ESPN",
+            "Alexa, ask Tapper to go to channel 204",
+            "Alexa, ask Tapper for the next channel"
+          ],
+          "keywords": ["iptv", "tv", "fire tv"]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "distributionCountries": ["US"],
+      "testingInstructions": "Private skill for the owner's own TVs.",
+      "category": "VIDEO"
+    },
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "https://YOUR-SERVER/alexa",
+          "sslCertificateType": "Trusted"
+        }
+      }
+    },
+    "manifestVersion": "1.0"
+  }
+}
