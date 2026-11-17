@@ -75,6 +75,11 @@ android {
         buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${oauthSetting("GOOGLE_OAUTH_CLIENT_ID")}\"")
         buildConfigField("String", "GOOGLE_OAUTH_CLIENT_SECRET", "\"${oauthSetting("GOOGLE_OAUTH_CLIENT_SECRET")}\"")
         buildConfigField("String", "MICROSOFT_OAUTH_CLIENT_ID", "\"${oauthSetting("MICROSOFT_OAUTH_CLIENT_ID")}\"")
+        // Trakt and OpenSubtitles stay hidden in the app until these are set
+        // as repository secrets (see README, "Optional service keys").
+        buildConfigField("String", "TRAKT_CLIENT_ID", "\"${oauthSetting("TRAKT_CLIENT_ID")}\"")
+        buildConfigField("String", "TRAKT_CLIENT_SECRET", "\"${oauthSetting("TRAKT_CLIENT_SECRET")}\"")
+        buildConfigField("String", "OPENSUBTITLES_API_KEY", "\"${oauthSetting("OPENSUBTITLES_API_KEY")}\"")
     }
     buildTypes {
         /**

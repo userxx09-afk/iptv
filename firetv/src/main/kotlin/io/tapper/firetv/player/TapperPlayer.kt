@@ -377,7 +377,28 @@ class TapperPlayer(
         if (first) android.util.Log.i("TapperPlayer", "ad marker first seen: $label")
     }
 
+    /** A subtitle file added for the current title (OpenSubtitles), kept across restarts of its stream. */
+    private var extraSubtitle: Pair<String, java.io.File>? = null
+
+    /**
+     * Adds a downloaded .srt to what's playing and shows it: the stream is
+     * reopened at the same position with the file attached.
+     */
+    fun addSubtitle(file: java.io.File, language: String) {
+        val ch = current ?: return
+        extraSubtitle = ch.id to file
+        settings?.captions = true
+        pendingResumeMs = positionMs()
+        lastLanguage = language
+        startStream(ch, ch.streams.first())
+    }
+    private var lastLanguage: String = "en"
+
+    /** True once an on-demand title has played to its end (virtual channels move on). */
+    fun hasEnded(): Boolean = player?.playbackState == Player.STATE_ENDED
+
     fun play(channel: Channel, resumeMs: Long? = null) {
+        if (extraSubtitle?.first != channel.id) extraSubtitle = null
         current = channel
         timeshiftOf = null
         pausedAtUtc = 0L
@@ -444,7 +465,19 @@ class TapperPlayer(
         applyTrackPrefs(exo)
         // A rebuilt player starts at full volume; a mute in progress carries over.
         exo.volume = if (muteRemainingMs() > 0L || !audible) 0f else 1f
-        exo.setMediaItem(MediaItem.fromUri(stream.url))
+        val sub = extraSubtitle?.takeIf { it.first == channel.id }?.second
+        exo.setMediaItem(
+            if (sub == null) MediaItem.fromUri(stream.url)
+            else MediaItem.Builder().setUri(stream.url).setSubtitleConfigurations(
+                listOf(
+                    MediaItem.SubtitleConfiguration.Builder(android.net.Uri.fromFile(sub))
+                        .setMimeType(androidx.media3.common.MimeTypes.APPLICATION_SUBRIP)
+                        .setLanguage(lastLanguage)
+                        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                        .build()
+                )
+            ).build()
+        )
         exo.prepare()
         // Seek after prepare: seeking before the timeline is known is ignored
         // on progressive sources, which silently restarts the episode.

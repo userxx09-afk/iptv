@@ -104,6 +104,20 @@ buttons explain that they aren't set up.
 
 Push to `main` (or re-run the workflows) after adding the secrets.
 
+## Optional service keys (Trakt, OpenSubtitles)
+
+Both stay hidden in the Fire TV app until their keys are added as repository
+secrets (Settings > Secrets and variables > Actions). Neither needs a server.
+
+| Secret | Where to get it |
+| --- | --- |
+| `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | trakt.tv > Settings > Your API Apps > New Application. Redirect URI: `urn:ietf:wg:oauth:2.0:oob`. |
+| `OPENSUBTITLES_API_KEY` | opensubtitles.com > your profile > API consumers > New consumer. |
+
+With them set, Settings shows "Sign in to Trakt" (a code entered at
+trakt.tv/activate) and turning captions on for a title with no subtitles
+fetches them from OpenSubtitles.
+
 ## Release pipeline
 
 The source repo is private. Every CI build publishes its installable APK to

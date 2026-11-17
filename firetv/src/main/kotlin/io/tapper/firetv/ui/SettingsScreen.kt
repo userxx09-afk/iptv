@@ -92,6 +92,8 @@ fun SettingsScreen(
     onSetBufferSize: (BufferSize) -> Unit,
     captions: Boolean = false,
     onSetCaptions: (Boolean) -> Unit = {},
+    largeText: Boolean = false,
+    onSetLargeText: (Boolean) -> Unit = {},
     preferredLanguage: String = "",
     onSetPreferredLanguage: (String) -> Unit = {},
     /** Minutes the Right-button commercial mute lasts. */
@@ -563,6 +565,11 @@ fun SettingsScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Chip("Captions off", !captions) { onSetCaptions(false) }
             Chip("Captions on", captions) { onSetCaptions(true) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Normal text", !largeText) { onSetLargeText(false) }
+            Chip("Larger text", largeText) { onSetLargeText(true) }
         }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
