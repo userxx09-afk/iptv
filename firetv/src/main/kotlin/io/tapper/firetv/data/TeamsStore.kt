@@ -25,6 +25,11 @@ class TeamsStore(context: Context) {
         }
     }.getOrDefault(emptyList())
 
+    /** Sets a reminder for every upcoming game by itself, on the best channel. */
+    var autoRemind: Boolean
+        get() = prefs.getBoolean("autoRemind", false)
+        set(v) { prefs.edit().putBoolean("autoRemind", v).apply() }
+
     fun has(team: Team) = all().any { it.league == team.league && it.id == team.id }
 
     /** Adds or removes [team]. Returns false when adding would go past [MAX]. */

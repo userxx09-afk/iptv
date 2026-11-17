@@ -61,7 +61,15 @@ class TmdbClient(private val apiKey: String) {
         val posterUrl: String?,
         /** 0-10 as TMDb reports it; null if this title has no votes yet. */
         val rating: Double?,
+        /** TMDb's id, for the cast lookup. */
+        val id: Long? = null,
     )
+
+    /** One actor in a title's cast. */
+    data class Person(val id: Long, val name: String, val character: String?)
+
+    /** One film or show a person appeared in. */
+    data class Credit(val title: String, val year: Int?, val isShow: Boolean)
 
     private companion object {
         // A shared, long-lived client, not one per TmdbClient instance.
@@ -140,21 +148,53 @@ class TmdbClient(private val apiKey: String) {
             overview = o.str("overview")?.takeIf { it.isNotBlank() },
             posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
             rating = rating?.takeIf { !it.isNaN() && it > 0.0 },
+            id = (o["id"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull(),
         )
+    }
+
+    /** The top-billed cast of a title, found by [search]. Empty when TMDb has no match. */
+    suspend fun cast(title: String, year: Int?, isShow: Boolean, limit: Int = 8): List<Person> {
+        val id = search(title, year, isShow)?.id ?: return emptyList()
+        val body = getJson("${if (isShow) "tv" else "movie"}/$id/credits", emptyMap())
+        val arr = (Json.parseToJsonElement(body) as? JsonObject)?.get("cast") as? JsonArray ?: return emptyList()
+        return arr.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val pid = o.str("id")?.toLongOrNull() ?: return@mapNotNull null
+            Person(pid, o.str("name") ?: return@mapNotNull null, o.str("character")?.takeIf { it.isNotBlank() })
+        }.take(limit)
+    }
+
+    /** Everything [personId] acted in, films and shows, most popular first. */
+    suspend fun filmography(personId: Long): List<Credit> {
+        val body = getJson("person/$personId/combined_credits", emptyMap())
+        val arr = (Json.parseToJsonElement(body) as? JsonObject)?.get("cast") as? JsonArray ?: return emptyList()
+        return arr.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val show = o.str("media_type") == "tv"
+            val name = (if (show) o.str("name") else o.str("title"))?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val year = o.str(if (show) "first_air_date" else "release_date")?.take(4)?.toIntOrNull()
+            val pop = (o["popularity"] as? JsonPrimitive)?.doubleOrNull ?: 0.0
+            pop to Credit(name, year, show)
+        }.sortedByDescending { it.first }.map { it.second }.distinct()
     }
 
     private fun JsonObject.str(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull
 
-    private suspend fun fetch(endpoint: String, title: String, year: Int?, isShow: Boolean): String {
+    private suspend fun fetch(endpoint: String, title: String, year: Int?, isShow: Boolean): String =
+        getJson("search/$endpoint", buildMap {
+            put("query", title)
+            if (year != null) put(if (isShow) "first_air_date_year" else "year", year.toString())
+            put("include_adult", "false")
+        })
+
+    private suspend fun getJson(path: String, params: Map<String, String>): String {
         val response: HttpResponse = try {
-            http.get("https://api.themoviedb.org/3/search/$endpoint") {
+            http.get("https://api.themoviedb.org/3/$path") {
                 // Ktor's parameter()/header() URL-encode the value themselves -
                 // no more hand-rolled java.net.URLEncoder calls, and no risk
                 // of forgetting one on a title with an "&" or "%" in it.
-                parameter("query", title)
-                if (year != null) parameter(if (isShow) "first_air_date_year" else "year", year)
-                parameter("include_adult", "false")
+                params.forEach { (k, v) -> parameter(k, v) }
                 // A v4 token authenticates via the Authorization header
                 // below instead of this query parameter - see the class doc
                 // comment for why both forms need to be supported.

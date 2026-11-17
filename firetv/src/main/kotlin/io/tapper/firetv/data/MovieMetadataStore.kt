@@ -126,6 +126,39 @@ class MovieMetadataStore(
         return metadata
     }
 
+    /** The cast of a film or show, from TMDb; empty without a key or a match. */
+    suspend fun castFor(channel: Channel): List<TmdbClient.Person> {
+        val key = apiKey
+        if (key.isBlank() || channel.kind == ContentKind.LIVE) return emptyList()
+        val (title, year) = parseTitle(channel.name)
+        return runCatching { TmdbClient(key).cast(title, year, channel.kind == ContentKind.SERIES) }
+            .onFailure { if (it is CancellationException) throw it; onError("$title cast: ${it.message}") }
+            .getOrDefault(emptyList())
+    }
+
+    /**
+     * The titles in [catalogue] that [person] appears in, matched on the
+     * cleaned title (and the year, when both sides have one).
+     */
+    suspend fun alsoStarring(person: TmdbClient.Person, catalogue: List<Channel>): List<Channel> {
+        val key = apiKey
+        if (key.isBlank()) return emptyList()
+        val credits = runCatching { TmdbClient(key).filmography(person.id) }
+            .onFailure { if (it is CancellationException) throw it; onError("${person.name}: ${it.message}") }
+            .getOrDefault(emptyList())
+        if (credits.isEmpty()) return emptyList()
+        val wanted = credits.groupBy { it.title.lowercase() }
+        return catalogue.filter { ch ->
+            if (ch.kind == ContentKind.LIVE) return@filter false
+            val (t, y) = parseTitle(ch.name)
+            val hits = wanted[t.lowercase()] ?: return@filter false
+            hits.any { c ->
+                val cy = c.year
+                c.isShow == (ch.kind == ContentKind.SERIES) && (y == null || cy == null || kotlin.math.abs(cy - y) <= 1)
+            }
+        }.distinctBy { parseTitle(it.name).first.lowercase() to it.kind }
+    }
+
     /** Forces every title to be looked up fresh next time it's focused -
      *  the escape hatch if TMDb's data for something changes, or a cached
      *  miss turns out to have been a title-cleanup bug rather than a real

@@ -35,6 +35,7 @@ class TapperApp : Application() {
     lateinit var channelEdits: io.tapper.firetv.data.ChannelEditStore; private set
     lateinit var parental: io.tapper.firetv.data.ParentalStore; private set
     lateinit var setupSync: io.tapper.firetv.data.SetupSync; private set
+    lateinit var seriesRules: io.tapper.firetv.data.SeriesRuleStore; private set
     lateinit var repository: PlaylistRepository; private set
     lateinit var garysFeed: io.tapper.firetv.data.GarysTvFeed; private set
     lateinit var epgDb: EpgDatabase; private set
@@ -139,6 +140,7 @@ class TapperApp : Application() {
         epgOverrides = EpgOverrideStore(this)
         reminders = ReminderStore(this)
         recordings = RecordingStore(this)
+        seriesRules = io.tapper.firetv.data.SeriesRuleStore(this)
         watch = WatchStore(this)
         sync = WatchSync(this, watch)
         setupSync = io.tapper.firetv.data.SetupSync(this, vault, sourceStore, sync)

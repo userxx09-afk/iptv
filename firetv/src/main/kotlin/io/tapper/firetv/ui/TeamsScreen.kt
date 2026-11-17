@@ -63,8 +63,11 @@ fun TeamsScreen(
     onWatch: (Channel) -> Unit,
     onRemind: (Channel, Game, ChannelMatch) -> Unit,
     onRecord: (Channel, Game, ChannelMatch) -> Unit,
+    /** Sets reminders for every upcoming game that has a channel, quietly. */
+    onAutoRemind: (List<MatchedGame>) -> Unit = {},
     onExit: () -> Unit,
 ) {
+    var autoRemind by remember { mutableStateOf(store.autoRemind) }
     var picking by remember { mutableStateOf(store.all().isEmpty()) }
     var teams by remember { mutableStateOf(store.all()) }
     var games by remember { mutableStateOf<List<MatchedGame>?>(null) }
@@ -86,6 +89,7 @@ fun TeamsScreen(
         }
         result.onFailure { errors = listOf(it.message ?: "Couldn't get the schedules") }
         games = result.getOrDefault(emptyList())
+        if (store.autoRemind) games?.let(onAutoRemind)
     }
 
     if (picking) {
@@ -111,6 +115,18 @@ fun TeamsScreen(
                     lines = listOf(teams.joinToString(", ") { it.name }),
                     modifier = Modifier.focusRequester(first),
                     onClick = { picking = true },
+                )
+            }
+            item(key = "auto") {
+                Row2(
+                    title = if (autoRemind) "Remind me of every game: on" else "Remind me of every game: off",
+                    lines = listOf("A reminder pops up on the TV as each game starts, on the channel that has it."),
+                    selected = autoRemind,
+                    onClick = {
+                        autoRemind = !autoRemind
+                        store.autoRemind = autoRemind
+                        if (autoRemind) games?.let(onAutoRemind)
+                    },
                 )
             }
             val list = games
@@ -194,7 +210,7 @@ private fun whereText(m: MatchedGame): String {
  * with no country) are offered by network name - an iptv-org list has a "FOX" in every country -
  * but any channel whose guide shows the game counts.
  */
-private fun matchChannels(
+internal fun matchChannels(
     g: Game,
     channels: List<Channel>,
     epgIdFor: (Channel) -> String,

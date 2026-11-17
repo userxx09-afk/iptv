@@ -73,7 +73,7 @@ struct PlayerView: View {
 
             if let player = controller.player {
                 if isLive {
-                    PlayerLayerView(player: player)
+                    PlayerLayerView(player: player, pictureInPicture: true)
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
                         .onTapGesture { toggleControls() }
@@ -230,6 +230,7 @@ struct PlayerView: View {
                 pauseButton
                 captionsButton
                 muteButton
+                PictureInPictureButton()
                 AirPlayButton()
                     .frame(width: 44, height: 44)
                 if playlist.count > 1 {
@@ -537,6 +538,8 @@ struct PlayerView: View {
 /// above replaces them.
 struct PlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
+    /// The main live player offers picture in picture; multiview tiles don't.
+    var pictureInPicture = false
 
     final class Container: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
@@ -548,7 +551,12 @@ struct PlayerLayerView: UIViewRepresentable {
         view.backgroundColor = .black
         view.playerLayer.videoGravity = .resizeAspect
         view.playerLayer.player = player
+        if pictureInPicture { PictureInPicture.shared.attach(view.playerLayer) }
         return view
+    }
+
+    static func dismantleUIView(_ view: Container, coordinator: ()) {
+        PictureInPicture.shared.detach(view.playerLayer)
     }
 
     func updateUIView(_ view: Container, context: Context) {

@@ -130,6 +130,30 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /** True while something plays full screen; Home then shrinks it to
+     *  picture in picture, on the Fire TV models that offer it. */
+    private var watchingFullScreen = false
+    var inPictureInPicture by mutableStateOf(false)
+        private set
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (!watchingFullScreen || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return
+        if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
+        runCatching {
+            enterPictureInPictureMode(
+                android.app.PictureInPictureParams.Builder()
+                    .setAspectRatio(android.util.Rational(16, 9))
+                    .build()
+            )
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPictureInPicture = isInPictureInPictureMode
+    }
+
     override fun onStart() {
         super.onStart()
         inBackground = false
@@ -176,6 +200,8 @@ class MainActivity : ComponentActivity() {
             // navigates to playingChannel and focuses it.
             var revealToken by remember { mutableIntStateOf(0) }
             var revealChannel by remember { mutableStateOf<Channel?>(null) }
+            // Mirrors the player state for onUserLeaveHint (picture in picture).
+            SideEffect { watchingFullScreen = playing != null && playerFullscreen }
             fun startPlayback(p: Playing) {
                 playToken++
                 playing = p
@@ -306,6 +332,10 @@ class MainActivity : ComponentActivity() {
             // filtered catalogue below is rebuilt.
             var editRevision by remember { mutableIntStateOf(0) }
             var prompt by remember { mutableStateOf<io.tapper.firetv.ui.PromptRequest?>(null) }
+            // Actor filmography: the cast of a title, then that person's other
+            // titles here. Two slots, since a menu's dismiss clears its own.
+            var castMenu by remember { mutableStateOf<Pair<Channel, List<io.tapper.core.tmdb.TmdbClient.Person>>?>(null) }
+            var starringMenu by remember { mutableStateOf<Pair<String, List<Channel>>?>(null) }
             // Same "mirror preferences into Compose state" pattern as
             // epgOverrideMap above: ReminderStore/RecordingStore are plain
             // SharedPreferences, so nothing here recomposes on its own when
@@ -738,10 +768,44 @@ class MainActivity : ComponentActivity() {
                 ask(null)
             }
 
+            /** One reminder per upcoming game, on its best channel; existing ones stay. */
+            fun autoRemindGames(list: List<io.tapper.firetv.ui.MatchedGame>) {
+                val now = System.currentTimeMillis()
+                var added = 0
+                for (m in list) {
+                    val (ch, match) = m.channels.firstOrNull() ?: continue
+                    val start = match.listing?.startUtc ?: m.game.startUtc
+                    if (start <= now) continue
+                    val id = Reminder.idFor(ch.sourceId, ch.id, start)
+                    if (id in reminderIds) continue
+                    app.reminders.add(
+                        Reminder(
+                            id = id, sourceId = ch.sourceId, channelId = ch.id, channelName = ch.name,
+                            programmeTitle = match.listing?.title ?: "${m.game.league.label}: ${m.game.title}",
+                            startUtc = start,
+                        )
+                    )
+                    added++
+                }
+                if (added > 0) refreshReminders()
+            }
+
             fun channelActions(ch: Channel): List<MenuAction> {
                 val edits = app.channelEdits
                 val hidden = edits.isHidden(ch)
-                return listOf(
+                val castAction = if (ch.kind != ContentKind.LIVE && app.movieMetadata.apiKey.isNotBlank()) listOf(
+                    MenuAction("Cast, and more with them...") {
+                        lifecycleScope.launch {
+                            val cast = app.movieMetadata.castFor(ch)
+                            if (cast.isEmpty()) {
+                                Toast.makeText(this@MainActivity, "TMDb has no cast for ${ch.name}", Toast.LENGTH_LONG).show()
+                            } else {
+                                castMenu = ch to cast
+                            }
+                        }
+                    },
+                ) else emptyList()
+                return castAction + listOf(
                     MenuAction("Rename...") {
                         withPin("Enter the PIN to edit channels") {
                             prompt = io.tapper.firetv.ui.PromptRequest(
@@ -843,6 +907,38 @@ class MainActivity : ComponentActivity() {
             }
 
             fun channelForEpgId(epgId: String): Channel? = epgChannelIndex.value[epgId]
+
+            // Series recordings: pick up airings the guide gained since the
+            // last background refresh.
+            LaunchedEffect(Unit) {
+                val n = withContext(Dispatchers.IO) {
+                    runCatching { app.seriesRules.scheduleUpcoming(app.epgDb, app.recordings, app.playerSettings) }.getOrDefault(0)
+                }
+                if (n > 0) refreshRecordings()
+            }
+
+            // My Teams' automatic reminders also run once per launch, so
+            // games are covered without opening My Teams.
+            LaunchedEffect(catalogue?.sourceId) {
+                val cat = catalogue ?: return@LaunchedEffect
+                val teams = app.teams.all()
+                if (!app.teams.autoRemind || teams.isEmpty()) return@LaunchedEffect
+                val matched = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val schedule = app.sports.games(teams, System.currentTimeMillis())
+                        schedule.games.map { g ->
+                            io.tapper.firetv.ui.MatchedGame(
+                                g,
+                                io.tapper.firetv.ui.matchChannels(g, cat.channels, ::epgIdFor) { from, to ->
+                                    app.epgDb.startingBetween(guideSourceIds, from, to)
+                                },
+                            )
+                        }
+                    }.getOrDefault(emptyList())
+                }
+                autoRemindGames(matched)
+            }
+
 
             TapperTheme {
                 val p = playing
@@ -1204,6 +1300,7 @@ class MainActivity : ComponentActivity() {
                         onSetTmdbApiKey = { k -> app.movieMetadata.apiKey = k; tmdbApiKey = k },
                         onClearMovieInfoCache = { app.movieMetadata.clearCache() },
                         household = {
+                            io.tapper.firetv.ui.RecordingSettings(app.playerSettings, app.seriesRules)
                             io.tapper.firetv.ui.HouseholdSettings(
                                 profiles = app.profiles,
                                 edits = app.channelEdits,
@@ -1335,13 +1432,15 @@ class MainActivity : ComponentActivity() {
                                 // starts from this moment rather than the
                                 // programme's own start, which may already be
                                 // in the past.
-                                val start = if (System.currentTimeMillis() in p.startUtc until p.endUtc)
-                                    System.currentTimeMillis() else p.startUtc
+                                val now = System.currentTimeMillis()
+                                val padBefore = app.playerSettings.recordPadBefore * 60_000L
+                                val padAfter = app.playerSettings.recordPadAfter * 60_000L
+                                val start = if (now >= p.startUtc - padBefore) now else p.startUtc - padBefore
                                 app.recordings.schedule(
                                     Recording(
                                         id = Recording.newId(), sourceId = ch.sourceId, channelId = ch.id,
                                         channelName = ch.name, streamUrl = url,
-                                        startUtc = start, endUtc = p.endUtc,
+                                        startUtc = start, endUtc = p.endUtc + padAfter,
                                     )
                                 )
                                 refreshRecordings()
@@ -1369,6 +1468,30 @@ class MainActivity : ComponentActivity() {
                         onOpenTeams = { push(Screen.Teams) },
                         multiviewCount = multiview.size,
                         channelActions = ::channelActions,
+                        isSeriesRecorded = { ch, p -> app.seriesRules.find(ch.sourceId, ch.id, p.title) != null },
+                        onToggleSeries = { ch, p ->
+                            val existing = app.seriesRules.find(ch.sourceId, ch.id, p.title)
+                            val url = recordableUrl(ch)
+                            when {
+                                existing != null -> {
+                                    app.seriesRules.remove(existing.id)
+                                    Toast.makeText(this@MainActivity, "No longer recording every ${p.title}. Scheduled ones stay in Recordings.", Toast.LENGTH_LONG).show()
+                                }
+                                url == null -> Toast.makeText(this@MainActivity, "${ch.name} can't be recorded", Toast.LENGTH_LONG).show()
+                                else -> {
+                                    app.seriesRules.add(
+                                        io.tapper.firetv.data.SeriesRuleStore.Rule(
+                                            id = app.seriesRules.newRuleId(), sourceId = ch.sourceId, channelId = ch.id,
+                                            channelName = ch.name, streamUrl = url, guideId = epgIdFor(ch),
+                                            guideSourceIds = guideSourceIds, title = p.title,
+                                        )
+                                    )
+                                    val n = app.seriesRules.scheduleUpcoming(app.epgDb, app.recordings, app.playerSettings)
+                                    refreshRecordings()
+                                    Toast.makeText(this@MainActivity, "Recording every ${p.title} on ${ch.name} ($n in the guide now)", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
                         categoryActions = ::categoryActions,
                         onAddToMultiview = { ch ->
                             val max = io.tapper.firetv.ui.multiviewTiles(this@MainActivity)
@@ -1410,6 +1533,7 @@ class MainActivity : ComponentActivity() {
                         epgIdFor = ::epgIdFor,
                         listingsBetween = { from, to -> app.epgDb.startingBetween(guideSourceIds, from, to) },
                         onWatch = { ch -> startPlayback(Playing(listOf(ch), 0)); pop() },
+                        onAutoRemind = { list -> autoRemindGames(list) },
                         onRemind = { ch, g, m ->
                             // The guide's listing when there is one (its start is what the
                             // reminder alarm fires on), otherwise the game's own start.
@@ -1553,6 +1677,39 @@ class MainActivity : ComponentActivity() {
                 }
                 prompt?.let { req ->
                     io.tapper.firetv.ui.TextPrompt(req, onDismiss = { if (prompt === req) prompt = null })
+                }
+                castMenu?.let { (ch, cast) ->
+                    io.tapper.firetv.ui.ItemMenu(
+                        title = "Cast of ${ch.name}",
+                        subtitle = "Pick someone to see what else they're in here.",
+                        actions = cast.map { person ->
+                            MenuAction(person.name + (person.character?.let { "  as $it" } ?: "")) {
+                                val all = rawCatalogue?.channels.orEmpty()
+                                lifecycleScope.launch {
+                                    val found = withContext(Dispatchers.IO) { app.movieMetadata.alsoStarring(person, all) }
+                                        .filterNot { it.id == ch.id && it.sourceId == ch.sourceId }
+                                    if (found.isEmpty()) {
+                                        Toast.makeText(this@MainActivity, "Nothing else with ${person.name} here", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        starringMenu = person.name to found
+                                    }
+                                }
+                            }
+                        },
+                        onDismiss = { castMenu = null },
+                    )
+                }
+                starringMenu?.let { (name, found) ->
+                    io.tapper.firetv.ui.ItemMenu(
+                        title = "With $name",
+                        subtitle = "${found.size} titles here",
+                        actions = found.take(30).map { t ->
+                            MenuAction(t.name + if (t.kind == ContentKind.SERIES) "  (series)" else "") {
+                                if (t.kind == ContentKind.SERIES) openSeries(t) else startPlayback(Playing(listOf(t), 0))
+                            }
+                        },
+                        onDismiss = { starringMenu = null },
+                    )
                 }
                 }
             }

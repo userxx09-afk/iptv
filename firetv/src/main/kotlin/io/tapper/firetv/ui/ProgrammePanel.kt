@@ -51,6 +51,9 @@ fun ProgrammePanel(
     /** Catch-up: true when this entry can be played from the archive. */
     canCatchUp: (EpgDatabase.Programme) -> Boolean = { false },
     onCatchUp: (EpgDatabase.Programme) -> Unit = {},
+    /** Series recording: whether a title is already recorded every time, and toggling it. */
+    isSeriesRecorded: (EpgDatabase.Programme) -> Boolean = { false },
+    onToggleSeries: ((EpgDatabase.Programme) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val fmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
@@ -163,6 +166,11 @@ fun ProgrammePanel(
                                             })
                                         }
                                         add(MenuAction("Record this") { onRecord(p); menu = null })
+                                    }
+                                    if (!past && onToggleSeries != null) {
+                                        add(MenuAction(
+                                            if (isSeriesRecorded(p)) "Stop recording every episode" else "Record every episode"
+                                        ) { onToggleSeries(p); menu = null })
                                     }
                                 },
                                 onDismiss = { menu = null },
