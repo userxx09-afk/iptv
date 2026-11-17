@@ -280,7 +280,7 @@ private val timeFmt: DateFormat get() = DateFormat.getTimeInstance(DateFormat.SH
 private fun InfoPane(channel: Channel?, programme: Programme?, now: Long, title: String) {
     var clock by remember { mutableStateOf(clockText()) }
     LaunchedEffect(Unit) { while (true) { delay(10_000); clock = clockText() } }
-    Row(Modifier.fillMaxWidth().height(150.dp)) {
+    Row(Modifier.fillMaxWidth().height(124.dp)) {
         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 programme?.title ?: channel?.name ?: "",
