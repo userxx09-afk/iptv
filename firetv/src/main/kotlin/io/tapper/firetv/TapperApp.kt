@@ -31,6 +31,10 @@ class TapperApp : Application() {
     lateinit var vault: CredentialVault; private set
     lateinit var sourceStore: SourceStore; private set
     lateinit var favorites: FavoritesStore; private set
+    lateinit var profiles: io.tapper.firetv.data.ProfileStore; private set
+    lateinit var channelEdits: io.tapper.firetv.data.ChannelEditStore; private set
+    lateinit var parental: io.tapper.firetv.data.ParentalStore; private set
+    lateinit var setupSync: io.tapper.firetv.data.SetupSync; private set
     lateinit var repository: PlaylistRepository; private set
     lateinit var garysFeed: io.tapper.firetv.data.GarysTvFeed; private set
     lateinit var epgDb: EpgDatabase; private set
@@ -48,6 +52,13 @@ class TapperApp : Application() {
     lateinit var teams: TeamsStore; private set
     /** My Teams' schedules (ESPN), kept in memory for the life of the app. */
     val sports by lazy { io.tapper.core.sports.SportsClient() }
+
+    /** Switches viewer profile: My List and pins follow it. The caller recreates the activity. */
+    fun switchProfile(id: String) {
+        profiles.activeId = id
+        favorites = FavoritesStore(this, profiles.favoritesPrefs())
+        parental.unlocked = false
+    }
 
     /** Last crash, if any, for Settings to display. */
     fun lastCrash(): String? =
@@ -116,7 +127,10 @@ class TapperApp : Application() {
         installCrashRecorder()
         vault = CredentialVault(this)
         sourceStore = SourceStore(this)
-        favorites = FavoritesStore(this)
+        profiles = io.tapper.firetv.data.ProfileStore(this)
+        favorites = FavoritesStore(this, profiles.favoritesPrefs())
+        channelEdits = io.tapper.firetv.data.ChannelEditStore(this)
+        parental = io.tapper.firetv.data.ParentalStore(this)
         garysFeed = io.tapper.firetv.data.GarysTvFeed(cacheDir, assets)
         repository = PlaylistRepository(cacheDir, vault, garysFeed, onWarning = { msg -> logEvent("CATALOGUE", msg) })
         epgDb = EpgDatabase(this)
@@ -127,6 +141,7 @@ class TapperApp : Application() {
         recordings = RecordingStore(this)
         watch = WatchStore(this)
         sync = WatchSync(this, watch)
+        setupSync = io.tapper.firetv.data.SetupSync(this, vault, sourceStore, sync)
         playerSettings = PlayerSettingsStore(this)
         repository.cacheMaxAgeHours = playerSettings.cacheHours
         navHome = NavHomeStore(this)

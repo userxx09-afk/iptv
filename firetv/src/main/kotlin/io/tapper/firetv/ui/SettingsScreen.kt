@@ -126,6 +126,8 @@ fun SettingsScreen(
     tmdbApiKey: String,
     onSetTmdbApiKey: (String) -> Unit,
     onClearMovieInfoCache: () -> Unit,
+    /** Profiles, parental controls, channel edits and setup copy; see HouseholdSettings. */
+    household: @Composable () -> Unit = {},
 ) {
     BackHandler { onExit() }
     var editing by remember { mutableStateOf<String?>(null) }
@@ -575,6 +577,8 @@ fun SettingsScreen(
                 "audio track and subtitles when a stream offers more than one.",
             style = MaterialTheme.typography.bodyMedium, color = Dim,
         )
+
+        household()
 
         Spacer(Modifier.height(28.dp))
         Text("COMMERCIAL MUTE", style = MaterialTheme.typography.bodyMedium, color = Dim)
