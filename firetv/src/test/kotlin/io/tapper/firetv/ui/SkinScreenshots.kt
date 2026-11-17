@@ -20,6 +20,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
+import com.github.takahirom.roborazzi.RoborazziOptions
+import com.github.takahirom.roborazzi.RoborazziTaskType
 import com.github.takahirom.roborazzi.captureRoboImage
 import io.tapper.core.model.Channel
 import io.tapper.core.model.StreamRef
@@ -59,7 +61,10 @@ class SkinScreenshots {
         UiSkin.choose(RuntimeEnvironment.getApplication(), skin)
         compose.setContent { TapperTheme { SampleBrowse() } }
         compose.waitForIdle()
-        compose.onRoot().captureRoboImage("build/skin-shots/$name.png")
+        compose.onRoot().captureRoboImage(
+            "build/skin-shots/$name.png",
+            roborazziOptions = RoborazziOptions(taskType = RoborazziTaskType.Record),
+        )
     }
 }
 

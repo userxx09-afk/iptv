@@ -38,6 +38,9 @@ jobs:
       - name: Print screenshots
         if: always()
         run: |
+          find firetv/build -name '*.png' -newer firetv/build.gradle.kts -path '*shot*' -o -name '*.png' -path '*roborazzi*' | head -20
+          ls firetv/build/test-results/testDebugUnitTest/ || true
+          grep -h -o 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*"' firetv/build/test-results/testDebugUnitTest/*.xml || true
           for f in firetv/build/skin-shots/*.png; do
             echo "=== BEGIN $(basename "$f")"; base64 -w 0 "$f"; echo; echo "=== END"
           done
