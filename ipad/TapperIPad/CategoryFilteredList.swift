@@ -656,7 +656,12 @@ private struct CategoryIndex: Equatable {
             .map { CountryCount(code: $0.key, count: $0.value) }
             .sorted { countryLabel($0.code).localizedCaseInsensitiveCompare(countryLabel($1.code)) == .orderedAscending }
         return CategoryIndex(
-            names: members.keys.sorted(),
+            // Free TV shown alongside another source goes to the bottom.
+            names: members.keys.sorted { a, b in
+                let fa = a.hasPrefix(GarysTvFiles.shared.ALONGSIDE_PREFIX)
+                let fb = b.hasPrefix(GarysTvFiles.shared.ALONGSIDE_PREFIX)
+                return fa == fb ? a < b : !fa
+            },
             members: members,
             countryOfItem: countryOfItem,
             countries: countries,

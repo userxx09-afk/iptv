@@ -9,6 +9,8 @@ struct TvSource: Identifiable, Codable, Equatable {
     enum Kind: String, Codable {
         case m3u
         case xtream
+        /// The Free TV lineup shared with GarysTV (GarysTvFeed). Built in.
+        case freeTv
     }
 
     let id: String
@@ -37,6 +39,17 @@ struct TvSource: Identifiable, Codable, Equatable {
     /// Shown by default here rather than hidden, per request. Not marked
     /// builtIn: like on Fire TV, it's an ordinary, removable source once
     /// added - only iptv-org above is permanent.
+    /// About 140 free US channels, kept in the GarysTV public repo - the
+    /// same Free TV source Fire TV has.
+    static let freeTv = TvSource(
+        id: "free-tv",
+        name: "Free TV",
+        kind: .freeTv,
+        location: "",
+        epgUrlOverride: nil,
+        builtIn: false
+    )
+
     static let prime4tv = TvSource(
         id: "xtream-prime4tv-hidden",
         name: "Old Prime4TV",
@@ -143,12 +156,15 @@ final class SourceStore {
     }
 
     func all() -> [TvSource] {
-        let list = rawSources()
-        guard !list.isEmpty else { return [.builtIn] }
+        var list = rawSources()
         // The built-in source is never removable - deleting it would leave a
         // new user with no obvious way back in, same reasoning as Fire TV.
-        if list.contains(where: { $0.builtIn }) { return list }
-        return [.builtIn] + list
+        if !list.contains(where: { $0.builtIn }) { list.insert(.builtIn, at: 0) }
+        // Free TV is always offered too, right after it.
+        if !list.contains(where: { $0.id == TvSource.freeTv.id }) {
+            list.insert(.freeTv, at: min(1, list.count))
+        }
+        return list
     }
 
     func save(_ sources: [TvSource]) {
@@ -160,7 +176,7 @@ final class SourceStore {
     }
 
     func remove(id: String) {
-        save(all().filter { $0.id != id || $0.builtIn })
+        save(all().filter { $0.id != id || $0.builtIn || $0.id == TvSource.freeTv.id })
     }
 
     var activeId: String {

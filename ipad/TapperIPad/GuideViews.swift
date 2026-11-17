@@ -77,6 +77,7 @@ struct ChannelGuideView: View {
     @State private var loaded = false
     @ObservedObject private var reminders = ReminderStore.shared
     @State private var notifyDenied = false
+    @State private var pickingGuide = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -138,7 +139,19 @@ struct ChannelGuideView: View {
             }
             .navigationTitle("Guide")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $pickingGuide) {
+                EpgPickerView(channel: channel, sourceId: SourceStore.shared.activeId) {
+                    pickingGuide = false
+                    Task {
+                        rows = await EpgManager.shared.schedule(for: channel)
+                        EpgManager.shared.reloadNow()
+                    }
+                }
+            }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Set program guide...") { pickingGuide = true }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: onClose)
                 }

@@ -23,6 +23,7 @@ struct SettingsView: View {
     @ObservedObject private var startup = StartupStore.shared
     @State private var resumeLast = StartupStore.shared.resumeLast
     @State private var startTab = StartupStore.shared.startTab
+    @State private var freeTvAlongside = FreeTvSettings.shared.showAlongside
 
     private let homeNamespaces = ["live", "movie", "series", "playlist"]
 
@@ -37,7 +38,7 @@ struct SettingsView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(source.name)
-                                    Text(source.kind == .xtream ? "Xtream" : "M3U playlist")
+                                    Text(source.kind == .xtream ? "Xtream" : source.kind == .freeTv ? "Free TV" : "M3U playlist")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -49,7 +50,7 @@ struct SettingsView: View {
                         }
                         .foregroundStyle(.primary)
                         .swipeActions {
-                            if !source.builtIn {
+                            if !source.builtIn && source.kind != .freeTv {
                                 Button("Remove", role: .destructive) { onRemove(source) }
                             }
                         }
@@ -63,6 +64,18 @@ struct SettingsView: View {
                     Text("Sources")
                 } footer: {
                     Text("Tap a source to load it. Swipe left on one to remove it.")
+                }
+
+                Section {
+                    Toggle("Show Free TV alongside", isOn: $freeTvAlongside)
+                        .onChange(of: freeTvAlongside) { _, newValue in
+                            FreeTvSettings.shared.showAlongside = newValue
+                            if newValue { FreeTvLoader.shared.loadIfNeeded() }
+                        }
+                } header: {
+                    Text("Free TV")
+                } footer: {
+                    Text("About 140 free US channels, listed at the bottom of the categories as \"Free TV · News\" and so on, whichever source is open. Takes effect the next time a source loads.")
                 }
 
                 Section {

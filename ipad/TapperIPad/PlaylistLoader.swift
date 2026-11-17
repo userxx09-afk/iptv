@@ -93,6 +93,22 @@ final class PlaylistLoader: ObservableObject {
         }
     }
 
+    /// The built-in Free TV source: the GarysTV lineup instead of an M3U.
+    func loadFreeTv() {
+        errorMessage = nil
+        isLoading = true
+        generation += 1
+        let myGeneration = generation
+        Task { [weak self] in
+            let lineup = await GarysTvFeed.shared.lineup(sourceId: TvSource.freeTv.id)
+            guard let self, self.generation == myGeneration else { return }
+            self.channels = lineup
+            self.declaredEpgUrls = []
+            self.isLoading = false
+            if lineup.isEmpty { self.errorMessage = "Couldn't load the Free TV lineup." }
+        }
+    }
+
     func reset() {
         generation += 1
         isLoading = false

@@ -14,6 +14,8 @@ final class EpgNowStore: ObservableObject {
     private(set) var nowPlaying: [String: EpgProgramme] = [:]
     /// Supplemental guides, by the compacted channel name they belong to.
     private(set) var hints: [(needle: String, ids: [String])] = []
+    /// GarysTV's guide files, for name-matched channels (set by the refresh).
+    var garysTvGuides: [GarysTvFiles.GuideFile] = []
 
     private init() {}
 
@@ -33,8 +35,16 @@ final class EpgNowStore: ObservableObject {
     /// provider never carries a schedule for it - Marquee Sports Network).
     func candidateKeys(for channel: Channel) -> [String] {
         var keys: [String] = []
+        // A guide picked by hand for this channel wins.
+        if let picked = EpgOverrideStore.shared.override(for: channel) { keys.append(picked) }
         let direct = EpgDatabase.normalizeId(channel.epgChannelId)
         if !direct.isEmpty { keys.append(direct) }
+        // A GarysTV extra guide matched by words in the channel's name
+        // (Marquee Sports Network from an IPTV plan, and others).
+        if !garysTvGuides.isEmpty,
+           let id = GarysTvFiles.shared.guideIdForName(channelName: channel.name, guides: garysTvGuides) {
+            keys.append(EpgDatabase.normalizeId(id))
+        }
         if !hints.isEmpty {
             let name = SupplementalEpgSource.compact(channel.name)
             for hint in hints where !hint.needle.isEmpty && name.contains(hint.needle) {
@@ -428,6 +438,49 @@ final class EpgManager {
                 AppLog.shared.log("EPG", "Supplemental \(host): \(rows.count) programmes")
             } catch {
                 AppLog.shared.log("EPG", "Supplemental \(host) failed: \(error.localizedDescription)")
+            }
+        }
+        added += await mergeGarysTvGuides(sourceId: sourceId, now: now)
+        return added
+    }
+
+    /// GarysTV's guide files (free-guides.json, extra-guides.json): Free TV
+    /// channels' listings, stored under each channel's own tvgId, and
+    /// listings for channels matched by name (stored under the file's id and
+    /// found through `garysTvNameMatches`).
+    private static func mergeGarysTvGuides(sourceId: String, now: Int) async -> Int {
+        let files = await GarysTvFeed.shared.guides()
+        await MainActor.run { EpgNowStore.shared.garysTvGuides = files }
+        var added = 0
+        for file in files {
+            if Task.isCancelled { return added }
+            // guideId -> the id the listings are stored under.
+            var target: [String: String] = [:]
+            for ch in file.channels {
+                let key = EpgDatabase.normalizeId(ch.guideId)
+                target[key] = ch.tvgId.map { EpgDatabase.normalizeId($0) } ?? key
+            }
+            guard !target.isEmpty, let url = URL(string: file.url) else { continue }
+            do {
+                let xml = try await GuideFile.fetchXml(from: url)
+                defer { try? FileManager.default.removeItem(at: xml) }
+                let wanted = Set(target.keys)
+                let rows: [EpgProgramme] = await withCheckedContinuation { (cont: CheckedContinuation<[EpgProgramme], Never>) in
+                    DispatchQueue.global(qos: .utility).async {
+                        var out: [EpgProgramme] = []
+                        _ = GuideFile.parse(file: xml, wanted: wanted, now: now, maxRows: 80_000) { p in
+                            let id = target[EpgDatabase.normalizeId(p.channelId)] ?? p.channelId
+                            out.append(EpgProgramme(channelId: id, start: p.start, end: p.end,
+                                                    title: p.title, description: p.description))
+                        }
+                        cont.resume(returning: out)
+                    }
+                }
+                EpgDatabase.shared.upsert(sourceId: sourceId, rows: rows)
+                added += rows.count
+                AppLog.shared.log("EPG", "GarysTV guide \(file.id): \(rows.count) programmes")
+            } catch {
+                AppLog.shared.log("EPG", "GarysTV guide \(file.id) failed: \(error.localizedDescription)")
             }
         }
         return added
