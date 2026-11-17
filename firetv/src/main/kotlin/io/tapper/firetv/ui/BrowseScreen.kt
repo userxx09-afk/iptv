@@ -244,6 +244,9 @@ fun BrowseScreen(
     /** Household edits and parental controls added to a channel's and a
      *  category's long-press menu (rename, hide, renumber, lock...). */
     channelActions: (Channel) -> List<MenuAction> = { emptyList() },
+    /** "Record every episode" on a guide entry; see SeriesRuleStore. */
+    isSeriesRecorded: (Channel, Programme) -> Boolean = { _, _ -> false },
+    onToggleSeries: ((Channel, Programme) -> Unit)? = null,
     categoryActions: (ContentKind, String) -> List<MenuAction> = { _, _ -> emptyList() },
     /** Bumped whenever a manual override changes. The focused channel's
      *  schedule is loaded once per focus change (see the LaunchedEffect
@@ -1591,6 +1594,8 @@ fun BrowseScreen(
                     onRecord = { p -> focusedChannel?.let { onRecord(it, p) } },
                     canCatchUp = { p -> focusedChannel?.let { canCatchUp(it, p) } ?: false },
                     onCatchUp = { p -> focusedChannel?.let { onCatchUp(it, p) } },
+                    isSeriesRecorded = { p -> focusedChannel?.let { isSeriesRecorded(it, p) } ?: false },
+                    onToggleSeries = onToggleSeries?.let { f -> { p: Programme -> focusedChannel?.let { f(it, p) } } },
                     modifier = guideModifier,
                 )
             } else {

@@ -83,7 +83,19 @@ class PlayerSettingsStore(context: Context) {
         get() = prefs.getString("language", "") ?: ""
         set(v) = prefs.edit().putString("language", v.trim().lowercase()).apply()
 
+    /** Minutes a scheduled recording starts early and runs late, since
+     *  guides drift and games run over. Set from Settings > Recordings. */
+    var recordPadBefore: Int
+        get() = prefs.getInt("rec_pad_before", 2).coerceIn(0, 30)
+        set(v) = prefs.edit().putInt("rec_pad_before", v.coerceIn(0, 30)).apply()
+
+    var recordPadAfter: Int
+        get() = prefs.getInt("rec_pad_after", 5).coerceIn(0, 120)
+        set(v) = prefs.edit().putInt("rec_pad_after", v.coerceIn(0, 120)).apply()
+
     companion object {
+        val PAD_BEFORE_CHOICES = listOf(0, 1, 2, 5, 10)
+        val PAD_AFTER_CHOICES = listOf(0, 5, 10, 15, 30, 60)
         /** Offered in Settings; code to label. */
         val LANGUAGE_CHOICES = listOf(
             "" to "Stream default", "en" to "English", "es" to "Spanish", "fr" to "French",

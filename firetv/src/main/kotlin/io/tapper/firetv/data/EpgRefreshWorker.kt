@@ -90,6 +90,8 @@ class EpgRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWo
                 val r = app.epg.refresh(s, declaredUrls(app, s))
                 if (s.id == source.id) primaryError = r.exceptionOrNull()
             }
+            // New guide rows may hold new airings of a series being recorded.
+            runCatching { app.seriesRules.scheduleUpcoming(app.epgDb, app.recordings, app.playerSettings) }
             primaryError?.let { throw it }
             Unit
         }.fold(
