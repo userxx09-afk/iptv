@@ -37,6 +37,7 @@ class TapperApp : Application() {
     lateinit var setupSync: io.tapper.firetv.data.SetupSync; private set
     lateinit var seriesRules: io.tapper.firetv.data.SeriesRuleStore; private set
     lateinit var trakt: io.tapper.firetv.data.TraktClient; private set
+    lateinit var alexa: io.tapper.firetv.data.AlexaLink; private set
     lateinit var openSubtitles: io.tapper.firetv.data.OpenSubtitlesClient; private set
     lateinit var repository: PlaylistRepository; private set
     lateinit var garysFeed: io.tapper.firetv.data.GarysTvFeed; private set
@@ -144,6 +145,7 @@ class TapperApp : Application() {
         recordings = RecordingStore(this)
         seriesRules = io.tapper.firetv.data.SeriesRuleStore(this)
         trakt = io.tapper.firetv.data.TraktClient(this)
+        alexa = io.tapper.firetv.data.AlexaLink(this)
         openSubtitles = io.tapper.firetv.data.OpenSubtitlesClient(cacheDir)
         watch = WatchStore(this)
         sync = WatchSync(this, watch)

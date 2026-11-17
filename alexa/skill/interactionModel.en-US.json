@@ -1,0 +1,35 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "tapper",
+      "intents": [
+        { "name": "AMAZON.CancelIntent", "samples": [] },
+        { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.StopIntent", "samples": [] },
+        { "name": "AMAZON.NavigateHomeIntent", "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] },
+        { "name": "AMAZON.PauseIntent", "samples": [] },
+        { "name": "AMAZON.ResumeIntent", "samples": [] },
+        {
+          "name": "LinkIntent",
+          "slots": [{ "name": "code", "type": "AMAZON.NUMBER" }],
+          "samples": ["link code {code}", "link {code}", "pair code {code}", "the code is {code}", "{code}"]
+        },
+        {
+          "name": "TuneIntent",
+          "slots": [{ "name": "channel", "type": "AMAZON.SearchQuery" }],
+          "samples": ["play {channel}", "put on {channel}", "tune to {channel}", "watch {channel}", "switch to {channel}", "go to {channel}"]
+        },
+        {
+          "name": "ChannelNumberIntent",
+          "slots": [{ "name": "number", "type": "AMAZON.NUMBER" }],
+          "samples": ["channel {number}", "go to channel {number}", "tune to channel {number}", "put on channel {number}"]
+        },
+        { "name": "ChannelUpIntent", "samples": ["next channel", "channel up", "go up a channel"] },
+        { "name": "ChannelDownIntent", "samples": ["previous channel", "channel down", "go back a channel", "last channel"] },
+        { "name": "StopWatchingIntent", "samples": ["stop watching", "stop the tv", "turn it off", "stop playing"] }
+      ],
+      "types": []
+    }
+  }
+}

@@ -926,6 +926,37 @@ class MainActivity : ComponentActivity() {
 
             fun channelForEpgId(epgId: String): Channel? = epgChannelIndex.value[epgId]
 
+            // Alexa (your own relay; see the alexa folder): while the app is
+            // on screen, act on what was said. Restarts when the relay changes.
+            var alexaRevision by remember { mutableIntStateOf(0) }
+            LaunchedEffect(alexaRevision, inBackground) {
+                if (inBackground || !app.alexa.configured || !app.alexa.registered) return@LaunchedEffect
+                app.alexa.listen { cmd ->
+                    fun key(code: Int) {
+                        dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+                        dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
+                    }
+                    val live = catalogue?.section(ContentKind.LIVE)?.items.orEmpty()
+                    when (cmd.type) {
+                        "tune", "number" -> {
+                            val target = if (cmd.type == "number") live.firstOrNull { it.number == cmd.number }
+                            else io.tapper.firetv.data.AlexaLink.bestMatch(cmd.query.orEmpty(), live, app.favorites.favorites())
+                            if (target == null) {
+                                Toast.makeText(this@MainActivity, "Alexa: no channel matches \"${cmd.query ?: cmd.number}\"", Toast.LENGTH_LONG).show()
+                            } else {
+                                startPlayback(Playing(live, live.indexOf(target).coerceAtLeast(0), live))
+                            }
+                        }
+                        "channelUp" -> key(android.view.KeyEvent.KEYCODE_CHANNEL_UP)
+                        "channelDown" -> key(android.view.KeyEvent.KEYCODE_CHANNEL_DOWN)
+                        "pause" -> key(android.view.KeyEvent.KEYCODE_MEDIA_PAUSE)
+                        "resume" -> key(android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+                        "stop" -> stopPlayback()
+                        "linked" -> Toast.makeText(this@MainActivity, "Alexa is linked to this TV", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+
             // Series recordings: pick up airings the guide gained since the
             // last background refresh.
             LaunchedEffect(Unit) {
@@ -1322,6 +1353,11 @@ class MainActivity : ComponentActivity() {
                         household = {
                             io.tapper.firetv.ui.RecordingSettings(app.playerSettings, app.seriesRules)
                             io.tapper.firetv.ui.TraktSettings(app.trakt, app.openSubtitles)
+                            io.tapper.firetv.ui.AlexaSettings(
+                                app.alexa,
+                                tvName = android.os.Build.MODEL ?: "Fire TV",
+                                onChanged = { alexaRevision++ },
+                            )
                             io.tapper.firetv.ui.HouseholdSettings(
                                 profiles = app.profiles,
                                 edits = app.channelEdits,
