@@ -1,5 +1,9 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.Skin
+import io.tapper.firetv.ui.theme.UiSkin
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -195,7 +199,7 @@ fun SettingsScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().background(Backdrop)
+        Modifier.fillMaxSize().skinBackground()
             .padding(horizontal = 48.dp, vertical = 32.dp)
             .verticalScroll(rememberScrollState())
     ) {
@@ -205,6 +209,21 @@ fun SettingsScreen(
             style = MaterialTheme.typography.bodyMedium, color = Dim)
 
         Spacer(Modifier.height(24.dp))
+        Text("LOOK", style = MaterialTheme.typography.bodyMedium, color = Dim)
+        Spacer(Modifier.height(8.dp))
+        val lookContext = androidx.compose.ui.platform.LocalContext.current
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Skin.entries.forEach { skin ->
+                Chip(skin.label, UiSkin.current == skin) { UiSkin.choose(lookContext, skin) }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            UiSkin.current.description + " Changes every screen right away.",
+            style = MaterialTheme.typography.bodyMedium, color = Dim,
+        )
+
+        Spacer(Modifier.height(28.dp))
         Text("SOURCES", style = MaterialTheme.typography.bodyMedium, color = Dim)
         Spacer(Modifier.height(8.dp))
 
@@ -214,7 +233,7 @@ fun SettingsScreen(
             Column(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = if (isActive) 0.08f else 0.04f))
+                    .background(panelTint(if (isActive) 0.08f else 0.04f))
                     .border(1.dp, if (isActive) Focus.copy(alpha = 0.6f) else Color.Transparent,
                         RoundedCornerShape(10.dp))
                     .padding(16.dp)
@@ -283,7 +302,7 @@ fun SettingsScreen(
                     Box(
                         Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
+                            .background(panelTint(0.06f))
                             .border(1.dp, Focus.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 14.dp, vertical = 12.dp)
                     ) {
@@ -391,7 +410,7 @@ fun SettingsScreen(
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 8.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = 0.04f))
+                    .background(panelTint(0.04f))
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -504,7 +523,7 @@ fun SettingsScreen(
                 Row(
                     Modifier.fillMaxWidth().padding(bottom = 8.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color.White.copy(alpha = 0.04f))
+                        .background(panelTint(0.04f))
                         .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -888,7 +907,7 @@ private fun SettingField(
     Spacer(Modifier.height(4.dp))
     Box(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.06f))
+            .background(panelTint(0.06f))
             .border(
                 if (rowFocused && !editing) 2.dp else 1.dp,
                 if (rowFocused && !editing) Focus else Focus.copy(alpha = 0.4f),

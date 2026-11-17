@@ -1,5 +1,8 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.skinFocusBar
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -93,7 +96,7 @@ fun EpisodesScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().background(Backdrop).padding(horizontal = 48.dp, vertical = 32.dp)
+        Modifier.fillMaxSize().skinBackground().padding(horizontal = 48.dp, vertical = 32.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (series.logoUrl != null) {
@@ -171,7 +174,7 @@ private fun EpisodeRow(
     Row(
         modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f))
+            .background(if (focused) Focus.copy(alpha = 0.18f) else panelTint(0.04f)).skinFocusBar(focused)
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
                 RoundedCornerShape(8.dp))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)

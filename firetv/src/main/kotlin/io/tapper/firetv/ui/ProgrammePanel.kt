@@ -1,5 +1,9 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.Accent
+import io.tapper.firetv.ui.theme.isGarysSkin
+import io.tapper.firetv.ui.theme.skinFocusBar
+import io.tapper.firetv.ui.theme.panelTint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -217,10 +221,11 @@ private fun ScheduleRow(
             .background(
                 when {
                     focused -> Focus.copy(alpha = 0.22f)
-                    live -> Focus.copy(alpha = 0.14f)
-                    else -> Color.White.copy(alpha = 0.03f)
+                    live -> Accent.copy(alpha = 0.14f)
+                    else -> panelTint(0.03f)
                 }
             )
+            .skinFocusBar(focused || (live && isGarysSkin))
             .border(
                 if (focused) 2.dp else 0.dp,
                 if (focused) Focus else Color.Transparent,
@@ -235,7 +240,7 @@ private fun ScheduleRow(
                 (if (live) "   ON NOW" else "") +
                 (if (archived) "   ▶ CATCH-UP" else ""),
             style = MaterialTheme.typography.bodyMedium,
-            color = if (live || archived) Focus else Dim,
+            color = if (live || archived) Accent else Dim,
         )
         Text(
             programme.title, style = MaterialTheme.typography.bodyLarge,

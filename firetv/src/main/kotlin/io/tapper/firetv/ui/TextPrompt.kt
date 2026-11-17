@@ -1,5 +1,7 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -60,15 +62,15 @@ fun TextPrompt(req: PromptRequest, onDismiss: () -> Unit) {
         Column(
             Modifier.widthIn(min = 420.dp, max = 600.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(Backdrop)
-                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp))
+                .skinBackground()
+                .border(1.dp, panelTint(0.10f), RoundedCornerShape(14.dp))
                 .padding(24.dp),
         ) {
             Text(req.title, style = MaterialTheme.typography.titleMedium, color = Ink)
             Spacer(Modifier.height(12.dp))
             Box(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                    .background(Color.White.copy(alpha = 0.06f))
+                    .background(panelTint(0.06f))
                     .border(2.dp, Focus, RoundedCornerShape(8.dp))
                     .padding(horizontal = 14.dp, vertical = 12.dp)
             ) {

@@ -1,5 +1,8 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.skinFocusBar
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import android.content.Intent
 import android.speech.RecognizerIntent
 import androidx.activity.compose.BackHandler
@@ -232,7 +235,7 @@ fun SearchScreen(
     val timeFmt = remember { SimpleDateFormat("EEE HH:mm", Locale.getDefault()) }
 
     Column(
-        Modifier.fillMaxSize().background(Backdrop).padding(horizontal = 48.dp, vertical = 32.dp)
+        Modifier.fillMaxSize().skinBackground().padding(horizontal = 48.dp, vertical = 32.dp)
     ) {
         Text("Search", style = MaterialTheme.typography.headlineLarge, color = Ink)
         Spacer(Modifier.height(16.dp))
@@ -241,7 +244,7 @@ fun SearchScreen(
         Box(
             Modifier.weight(1f)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.White.copy(alpha = 0.06f))
+                .background(panelTint(0.06f))
                 .border(1.dp, Focus.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                 .padding(horizontal = 16.dp, vertical = 14.dp),
         ) {
@@ -400,7 +403,7 @@ private fun ResultRow(
     Row(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f))
+            .background(if (focused) Focus.copy(alpha = 0.18f) else panelTint(0.04f)).skinFocusBar(focused)
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
                 RoundedCornerShape(8.dp))
             // Same explicit handling as the browse rows: a held D-pad centre on

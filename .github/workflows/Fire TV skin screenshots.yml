@@ -1,0 +1,43 @@
+name: Fire TV skin screenshots
+
+# Runs on pushes to skin branches (feature/...skin...) and by hand. Compiles the Fire TV app (debug) and renders each skin's
+# browse screen with Robolectric, then uploads the PNGs as an artifact.
+# Publishes nothing: no APK, no release, and Fire TVs don't update.
+on:
+  push:
+    branches: ['feature/*skin*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Render skin screenshots
+        run: gradle :firetv:testDebugUnitTest --tests 'io.tapper.firetv.ui.SkinScreenshots' --no-daemon --stacktrace
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skin-screenshots
+          path: firetv/build/skin-shots/*.png
+          retention-days: 14

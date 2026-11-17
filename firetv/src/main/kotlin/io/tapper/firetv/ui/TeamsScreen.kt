@@ -1,5 +1,7 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -99,7 +101,7 @@ fun TeamsScreen(
 
     val fmt = remember { SimpleDateFormat("EEE d MMM, h:mm a", Locale.getDefault()) }
     val first = remember { FocusRequester() }
-    Column(Modifier.fillMaxSize().background(Backdrop).padding(horizontal = 48.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skinBackground().padding(horizontal = 48.dp, vertical = 32.dp)) {
         Text("My Teams", style = MaterialTheme.typography.headlineLarge, color = Ink)
         Spacer(Modifier.height(6.dp))
         Text(
@@ -248,7 +250,7 @@ private fun TeamPicker(store: TeamsStore, sports: SportsClient, onChanged: () ->
         error = r.exceptionOrNull()?.message
     }
 
-    Column(Modifier.fillMaxSize().background(Backdrop).padding(horizontal = 48.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skinBackground().padding(horizontal = 48.dp, vertical = 32.dp)) {
         Text("Pick your teams", style = MaterialTheme.typography.headlineLarge, color = Ink)
         Spacer(Modifier.height(6.dp))
         val mine = remember(revision) { store.all() }
@@ -312,8 +314,8 @@ private fun Row2(
             .background(
                 when {
                     focused -> Focus.copy(alpha = 0.18f)
-                    selected -> Color.White.copy(alpha = 0.10f)
-                    else -> Color.White.copy(alpha = 0.04f)
+                    selected -> panelTint(0.10f)
+                    else -> panelTint(0.04f)
                 }
             )
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent, RoundedCornerShape(10.dp))

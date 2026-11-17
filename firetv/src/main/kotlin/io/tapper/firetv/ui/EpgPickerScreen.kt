@@ -1,5 +1,7 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -72,7 +74,7 @@ fun EpgPickerScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().background(Backdrop).padding(horizontal = 48.dp, vertical = 32.dp)
+        Modifier.fillMaxSize().skinBackground().padding(horizontal = 48.dp, vertical = 32.dp)
     ) {
         Text("Guide for " + channel.name, style = MaterialTheme.typography.headlineLarge, color = Ink)
         Spacer(Modifier.height(6.dp))
@@ -89,7 +91,7 @@ fun EpgPickerScreen(
         Box(
             Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.White.copy(alpha = 0.06f))
+                .background(panelTint(0.06f))
                 .border(1.dp, Focus.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                 .padding(horizontal = 16.dp, vertical = 14.dp),
         ) {
@@ -160,7 +162,7 @@ private fun GuideRow(id: String, title: String?, active: Boolean, onClick: () ->
                 when {
                     focused -> Focus.copy(alpha = 0.18f)
                     active -> Focus.copy(alpha = 0.10f)
-                    else -> Color.White.copy(alpha = 0.04f)
+                    else -> panelTint(0.04f)
                 }
             )
             .border(
