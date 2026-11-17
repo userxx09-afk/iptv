@@ -180,6 +180,49 @@ class TapperPlayer(
             .build()
     }
 
+    /**
+     * One line describing the stream: picture size and frame rate, video
+     * codec, bitrate, audio, and how far behind live it is. Blank until the
+     * first frame. Shown with the channel overlay.
+     */
+    fun streamInfo(): String {
+        val p = player ?: return ""
+        val parts = ArrayList<String>()
+        p.videoFormat?.let { v ->
+            if (v.height > 0) {
+                parts += "${v.width}×${v.height}" +
+                    (if (v.frameRate > 0f) " ${kotlin.math.round(v.frameRate).toInt()}fps" else "")
+            }
+            v.codecs?.substringBefore('.')?.takeIf { it.isNotBlank() }?.let { parts += it }
+            val bitrate = listOf(v.bitrate, v.averageBitrate, v.peakBitrate).firstOrNull { it > 0 }
+            if (bitrate != null) parts += String.format(java.util.Locale.US, "%.1f Mbps", bitrate / 1_000_000.0)
+        }
+        p.audioFormat?.let { a ->
+            val audio = listOfNotNull(
+                a.sampleMimeType?.substringAfter('/')?.uppercase(),
+                a.channelCount.takeIf { it > 0 }?.let { if (it == 6) "5.1" else "${it}ch" },
+                a.language?.takeIf { it.isNotBlank() && it != "und" },
+            ).joinToString(" ")
+            if (audio.isNotEmpty()) parts += audio
+        }
+        behindLiveMs()?.let { parts += "${it / 1000}s behind live" }
+        return parts.joinToString("  ·  ")
+    }
+
+    /** How far behind the live edge playback is, when that's known and
+     *  noticeable (over 15 seconds); null otherwise. */
+    fun behindLiveMs(): Long? {
+        val p = player ?: return null
+        if (!p.isCurrentMediaItemLive) return null
+        val offset = p.currentLiveOffset
+        return if (offset != C.TIME_UNSET && offset > 15_000L) offset else null
+    }
+
+    /** Back to the live edge, for a stream that has drifted behind. */
+    fun jumpToLive() {
+        player?.seekToDefaultPosition()
+    }
+
     fun captionsOn(): Boolean = settings?.captions == true
 
     /** Flips captions for this and every later stream; returns the new state. */

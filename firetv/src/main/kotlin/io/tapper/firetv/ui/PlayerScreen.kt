@@ -118,6 +118,7 @@ fun PlayerScreen(
     var soundOnFlash by remember { mutableStateOf(false) }
     // What the stream says about ad markers - see TapperPlayer.markerSummary.
     var markerLine by remember(channel.id) { mutableStateOf("") }
+    var infoLine by remember(channel.id) { mutableStateOf("") }
 
     // In-player channel browsing, live only - there is no "next channel" to
     // browse on an on-demand item. 0 = plain playback. 1 = the compact guide
@@ -213,6 +214,8 @@ fun PlayerScreen(
             if (overlayVisible) {
                 val m = player.markerSummary()
                 if (m != markerLine) markerLine = m
+                val info = clockText() + player.streamInfo().let { if (it.isEmpty()) "" else "  ·  $it" }
+                if (info != infoLine) infoLine = info
             }
         }
     }
@@ -485,6 +488,15 @@ fun PlayerScreen(
                     // Menu (the three-line button) or a remote's own CC key
                     // turns captions on and off.
                     Key.Menu -> { toggleCaptions(); true }
+                    // Fast-forward on live: back to the live edge, for a
+                    // stream that has fallen behind (a minute behind on
+                    // sports is the usual complaint).
+                    Key.MediaFastForward ->
+                        if (channel.kind == ContentKind.LIVE) {
+                            player.jumpToLive()
+                            android.widget.Toast.makeText(context, "Jumped to live", android.widget.Toast.LENGTH_SHORT).show()
+                            true
+                        } else false
                     else -> if (e.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_CAPTIONS) {
                         toggleCaptions(); true
                     } else false
@@ -598,14 +610,25 @@ fun PlayerScreen(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
-            if (overlayVisible && overlayLevel == 0 && status == null && !showControls && markerLine.isNotEmpty()) {
-                Text(
-                    markerLine,
-                    style = MaterialTheme.typography.bodyMedium, color = Dim,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(48.dp)
+            if (overlayVisible && overlayLevel == 0 && status == null && !showControls) {
+                // Time and what the stream is (resolution, bitrate, audio,
+                // delay behind live), then the ad-marker diagnostic.
+                Column(
+                    Modifier.align(Alignment.TopEnd).padding(48.dp)
                         .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
                         .padding(horizontal = 12.dp, vertical = 6.dp),
-                )
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    if (infoLine.isNotEmpty()) {
+                        Text(infoLine, style = MaterialTheme.typography.bodyMedium, color = Ink)
+                    }
+                    if (player.behindLiveMs() != null) {
+                        Text("Fast-forward ⏩ to jump to live", style = MaterialTheme.typography.bodyMedium, color = Focus)
+                    }
+                    if (markerLine.isNotEmpty()) {
+                        Text(markerLine, style = MaterialTheme.typography.bodyMedium, color = Dim)
+                    }
+                }
             }
         }
 
