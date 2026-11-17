@@ -237,6 +237,10 @@ fun BrowseScreen(
     onRecordChannel: (Channel) -> Unit,
     onOpenRecordings: () -> Unit,
     onOpenTeams: () -> Unit = {},
+    /** Multiview: add a live channel to it, open it, and how many are in it. */
+    onAddToMultiview: (Channel) -> Unit = {},
+    onOpenMultiview: () -> Unit = {},
+    multiviewCount: Int = 0,
     /** Bumped whenever a manual override changes. The focused channel's
      *  schedule is loaded once per focus change (see the LaunchedEffect
      *  below), so without this an override set from this same channel's menu
@@ -1130,7 +1134,10 @@ fun BrowseScreen(
                                     // window; see RecordingsScreen to stop
                                     // it early.
                                     MenuAction("Record now") { onRecordChannel(ch) },
-                                ) else emptyList(),
+                                    MenuAction("Add to multiview") { onAddToMultiview(ch) },
+                                ) + (if (multiviewCount > 0) listOf(
+                                    MenuAction("Open multiview ($multiviewCount)") { onOpenMultiview() },
+                                ) else emptyList()) else emptyList(),
                                 onDismiss = { menu = null },
                             )
                         }

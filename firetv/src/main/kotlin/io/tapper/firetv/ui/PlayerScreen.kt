@@ -119,6 +119,7 @@ fun PlayerScreen(
     // What the stream says about ad markers - see TapperPlayer.markerSummary.
     var markerLine by remember(channel.id) { mutableStateOf("") }
     var infoLine by remember(channel.id) { mutableStateOf("") }
+    var livePaused by remember(channel.id) { mutableStateOf(false) }
 
     // In-player channel browsing, live only - there is no "next channel" to
     // browse on an on-demand item. 0 = plain playback. 1 = the compact guide
@@ -491,8 +492,23 @@ fun PlayerScreen(
                     // Fast-forward on live: back to the live edge, for a
                     // stream that has fallen behind (a minute behind on
                     // sports is the usual complaint).
+                    // Pause live TV, and pick up where it stopped (from the
+                    // provider's archive when the pause outlasts the buffer).
+                    Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause ->
+                        if (channel.kind == ContentKind.LIVE) {
+                            livePaused = player.toggleLivePause()
+                            overlayVisible = true
+                            true
+                        } else false
+                    Key.MediaRewind ->
+                        if (channel.kind == ContentKind.LIVE) {
+                            player.rewindLive(30_000L)
+                            overlayVisible = true
+                            true
+                        } else false
                     Key.MediaFastForward ->
                         if (channel.kind == ContentKind.LIVE) {
+                            livePaused = false
                             player.jumpToLive()
                             android.widget.Toast.makeText(context, "Jumped to live", android.widget.Toast.LENGTH_SHORT).show()
                             true
@@ -622,7 +638,10 @@ fun PlayerScreen(
                     if (infoLine.isNotEmpty()) {
                         Text(infoLine, style = MaterialTheme.typography.bodyMedium, color = Ink)
                     }
-                    if (player.behindLiveMs() != null) {
+                    if (livePaused) {
+                        Text("Paused  ·  Play to continue", style = MaterialTheme.typography.bodyLarge, color = Ink)
+                    }
+                    if (player.behindLiveMs() != null || player.timeshiftBehindMs() != null) {
                         Text("Fast-forward ⏩ to jump to live", style = MaterialTheme.typography.bodyMedium, color = Focus)
                     }
                     if (markerLine.isNotEmpty()) {

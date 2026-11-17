@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.PlayerView
 import io.tapper.core.auth.Redact
+import io.tapper.core.catchup.CatchupUrl
 import io.tapper.core.model.Channel
 import io.tapper.core.model.StreamRef
 import io.tapper.core.playback.*
@@ -68,7 +69,86 @@ class TapperPlayer(
      */
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(bufferSize.minMs, bufferSize.maxMs, bufferSize.playbackMs, bufferSize.rebufferMs)
+        // Keep the last minute played, so Rewind on a live channel has
+        // somewhere to go even without a provider archive. Held in memory,
+        // which is why it is a minute and not more on a 1.5GB stick.
+        .setBackBuffer(BACK_BUFFER_MS, true)
         .build()
+
+    /** When false this player stays silent - a multiview tile without the
+     *  sound. A commercial mute still applies on top. */
+    private var audible = true
+
+    fun setAudible(on: Boolean) {
+        audible = on
+        player?.volume = if (on && muteRemainingMs() == 0L) 1f else 0f
+    }
+
+    // Pausing live TV. A paused live stream keeps its place for as long as
+    // the buffer lasts; after that, a channel with a provider archive picks
+    // up from the archive at the moment it was paused (true timeshift), and
+    // one without goes back to live.
+    private var pausedAtUtc = 0L
+    /** Set while playing from the archive after a pause or rewind: where in
+     *  real time the archive started, and the live channel to go back to. */
+    private var timeshiftStartUtc = 0L
+    private var timeshiftOf: Channel? = null
+
+    /** Pauses or resumes a live channel; returns true when now paused. */
+    fun toggleLivePause(): Boolean {
+        val p = player ?: return false
+        if (p.playWhenReady) {
+            p.playWhenReady = false
+            pausedAtUtc = System.currentTimeMillis()
+            return true
+        }
+        val ch = timeshiftOf ?: current
+        val pausedFor = System.currentTimeMillis() - pausedAtUtc
+        if (timeshiftOf == null && ch != null && pausedAtUtc > 0 && pausedFor > PAUSE_KEEPS_PLACE_MS &&
+            CatchupUrl.canPlay(ch, pausedAtUtc, System.currentTimeMillis())
+        ) {
+            playFromArchive(ch, pausedAtUtc)
+        } else {
+            p.playWhenReady = true
+        }
+        pausedAtUtc = 0L
+        return false
+    }
+
+    /**
+     * Rewind on a live channel: back [ms] within what the player still
+     * holds, or - on a channel with an archive - from the archive.
+     */
+    fun rewindLive(ms: Long) {
+        val p = player ?: return
+        val ch = timeshiftOf ?: current ?: return
+        if (timeshiftOf != null || durationMs() > 0) { seekBy(-ms); return }
+        if (ch.catchup != null) {
+            playFromArchive(ch, System.currentTimeMillis() - ms - (p.currentLiveOffset.takeIf { it != C.TIME_UNSET } ?: 0L))
+            return
+        }
+        seekBy(-ms)
+    }
+
+    /** How far behind live a paused or archive-played channel is, or null. */
+    fun timeshiftBehindMs(): Long? {
+        if (timeshiftOf != null) {
+            return (System.currentTimeMillis() - (timeshiftStartUtc + positionMs())).coerceAtLeast(0L)
+        }
+        if (pausedAtUtc > 0) return System.currentTimeMillis() - pausedAtUtc
+        return null
+    }
+
+    private fun playFromArchive(ch: Channel, fromUtc: Long) {
+        val now = System.currentTimeMillis()
+        val url = CatchupUrl.url(ch, fromUtc, now + 4 * 60 * 60 * 1000L, now) ?: return
+        timeshiftOf = ch
+        timeshiftStartUtc = fromUtc
+        val headers = ch.streams.firstOrNull()?.headers.orEmpty()
+        player?.release(); player = null
+        pendingResumeMs = null
+        startStream(ch, StreamRef(url, 0, headers))
+    }
 
     private var player: ExoPlayer? = null
     private var view: PlayerView? = null
@@ -132,6 +212,10 @@ class TapperPlayer(
         /** Pause after the connection returns, so it has settled (and the
          *  provider has noticed the old connection closed) before reopening. */
         private const val RECONNECT_DELAY_MS = 1_200L
+        /** Rewind room kept in memory on a live channel. */
+        private const val BACK_BUFFER_MS = 60_000
+        /** A pause shorter than this resumes from the buffer; longer, from the archive. */
+        private const val PAUSE_KEEPS_PLACE_MS = 20_000L
     }
 
     fun attach(playerView: PlayerView) {
@@ -205,7 +289,7 @@ class TapperPlayer(
             ).joinToString(" ")
             if (audio.isNotEmpty()) parts += audio
         }
-        behindLiveMs()?.let { parts += "${it / 1000}s behind live" }
+        (timeshiftBehindMs() ?: behindLiveMs())?.let { parts += behindText(it) }
         return parts.joinToString("  ·  ")
     }
 
@@ -218,9 +302,26 @@ class TapperPlayer(
         return if (offset != C.TIME_UNSET && offset > 15_000L) offset else null
     }
 
-    /** Back to the live edge, for a stream that has drifted behind. */
+    /** Back to the live edge, for a stream that has drifted behind or is
+     *  playing from the archive after a pause. */
     fun jumpToLive() {
+        val live = timeshiftOf
+        pausedAtUtc = 0L
+        if (live != null) {
+            timeshiftOf = null
+            player?.release(); player = null
+            startStream(live, live.streams.getOrNull(attempt) ?: live.streams.first())
+            return
+        }
+        player?.playWhenReady = true
         player?.seekToDefaultPosition()
+    }
+
+    private fun behindText(ms: Long): String {
+        val s = ms / 1000
+        return if (s >= 3600) "${s / 3600}:${((s % 3600) / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')} behind live"
+        else if (s >= 60) "${s / 60}:${(s % 60).toString().padStart(2, '0')} behind live"
+        else "${s}s behind live"
     }
 
     fun captionsOn(): Boolean = settings?.captions == true
@@ -257,7 +358,7 @@ class TapperPlayer(
     private fun clearMute() {
         muteJob?.cancel(); muteJob = null
         muteUntilMs = 0L
-        player?.volume = 1f
+        player?.volume = if (audible) 1f else 0f
     }
 
     /** One line for the screen: what ad markers this stream has shown. */
@@ -278,6 +379,8 @@ class TapperPlayer(
 
     fun play(channel: Channel, resumeMs: Long? = null) {
         current = channel
+        timeshiftOf = null
+        pausedAtUtc = 0L
         clearMute()
         markerCounts.clear(); seenPlaylistTags.clear(); otherMetadata = 0
         attempt = 0
@@ -340,7 +443,7 @@ class TapperPlayer(
 
         applyTrackPrefs(exo)
         // A rebuilt player starts at full volume; a mute in progress carries over.
-        exo.volume = if (muteRemainingMs() > 0L) 0f else 1f
+        exo.volume = if (muteRemainingMs() > 0L || !audible) 0f else 1f
         exo.setMediaItem(MediaItem.fromUri(stream.url))
         exo.prepare()
         // Seek after prepare: seeking before the timeline is known is ignored

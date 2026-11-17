@@ -29,6 +29,8 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showTeams = false
+    @State private var showMultiview = false
+    @ObservedObject private var multiview = MultiviewStore.shared
     @State private var showAddSource = false
     @State private var addSourceBusy = false
     @State private var addSourceError: String?
@@ -162,6 +164,14 @@ struct ContentView: View {
                     }
                 },
                 onClose: { guideChannel = nil }
+            )
+        }
+        .fullScreenCover(isPresented: $showMultiview) {
+            MultiviewView(
+                onFullScreen: { channel in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { play(channel, live: true) }
+                },
+                onClose: { showMultiview = false }
             )
         }
         .sheet(isPresented: $showTeams) {
@@ -690,6 +700,24 @@ struct ContentView: View {
                         }
                     }
                     .disabled(!channel.isPlayable)
+                    .contextMenu {
+                        if isLive {
+                            Button {
+                                if MultiviewStore.shared.add(channel), MultiviewStore.shared.channels.count >= 2 {
+                                    showMultiview = true
+                                }
+                            } label: {
+                                Label("Add to multiview", systemImage: "rectangle.split.2x2")
+                            }
+                            if !multiview.channels.isEmpty {
+                                Button {
+                                    showMultiview = true
+                                } label: {
+                                    Label("Open multiview (\(multiview.channels.count))", systemImage: "rectangle.split.2x2.fill")
+                                }
+                            }
+                        }
+                    }
                     if isLive {
                         Button {
                             guideChannel = channel
