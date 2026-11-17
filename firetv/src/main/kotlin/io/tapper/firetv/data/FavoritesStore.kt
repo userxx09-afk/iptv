@@ -10,9 +10,10 @@ import io.tapper.core.model.ContentKind
  * favourites list organised by provider would be useless, since the whole point
  * is one place for the handful of channels actually watched.
  */
-class FavoritesStore(context: Context) {
+class FavoritesStore(context: Context, prefsName: String = "tapper_favorites") {
 
-    private val prefs = context.getSharedPreferences("tapper_favorites", Context.MODE_PRIVATE)
+    /** Each profile has its own My List and pins; see ProfileStore.favoritesPrefs. */
+    private val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
 
     private fun key(sourceId: String, channelId: String) = "$sourceId|$channelId"
 

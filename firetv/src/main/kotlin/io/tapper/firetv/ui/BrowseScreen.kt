@@ -241,6 +241,10 @@ fun BrowseScreen(
     onAddToMultiview: (Channel) -> Unit = {},
     onOpenMultiview: () -> Unit = {},
     multiviewCount: Int = 0,
+    /** Household edits and parental controls added to a channel's and a
+     *  category's long-press menu (rename, hide, renumber, lock...). */
+    channelActions: (Channel) -> List<MenuAction> = { emptyList() },
+    categoryActions: (ContentKind, String) -> List<MenuAction> = { _, _ -> emptyList() },
     /** Bumped whenever a manual override changes. The focused channel's
      *  schedule is loaded once per focus change (see the LaunchedEffect
      *  below), so without this an override set from this same channel's menu
@@ -1124,7 +1128,7 @@ fun BrowseScreen(
                                     MenuAction(
                                         if (isPinnedCh) "Unpin from top" else "Pin to top"
                                     ) { favorites.togglePinnedChannel(ch.sourceId, ch.id); revision++ },
-                                ) + if (ch.kind == ContentKind.LIVE) listOf(
+                                ) + (if (ch.kind == ContentKind.LIVE) listOf(
                                     // The fix for a channel whose guide never
                                     // loads: point it at whichever guide id
                                     // actually carries its listings.
@@ -1137,7 +1141,7 @@ fun BrowseScreen(
                                     MenuAction("Add to multiview") { onAddToMultiview(ch) },
                                 ) + (if (multiviewCount > 0) listOf(
                                     MenuAction("Open multiview ($multiviewCount)") { onOpenMultiview() },
-                                ) else emptyList()) else emptyList(),
+                                ) else emptyList()) else emptyList()) + channelActions(ch),
                                 onDismiss = { menu = null },
                             )
                         }
@@ -1283,7 +1287,7 @@ fun BrowseScreen(
                                     MenuAction(if (isPinned) "Unpin from top" else "Pin to top") {
                                         favorites.togglePinnedCategory(kind, category); revision++
                                     }
-                                ),
+                                ) + categoryActions(kind, category),
                                 onDismiss = { menu = null },
                             )
                         }

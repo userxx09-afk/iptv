@@ -42,10 +42,12 @@ import io.tapper.firetv.data.Recording
 import io.tapper.firetv.data.Reminder
 import io.tapper.firetv.data.TvSource
 import io.tapper.firetv.data.withResolvedLogos
+import io.tapper.firetv.data.withEdits
 import io.tapper.firetv.recordings.RecordingAlarmReceiver
 import io.tapper.firetv.recordings.RecordingService
 import io.tapper.firetv.ui.AddSourceScreen
 import io.tapper.firetv.ui.BrowseScreen
+import io.tapper.firetv.ui.MenuAction
 import io.tapper.firetv.ui.EpgPickerScreen
 import io.tapper.firetv.ui.EpisodesScreen
 import io.tapper.firetv.ui.FailureScreen
@@ -300,6 +302,10 @@ class MainActivity : ComponentActivity() {
             // epgIdFor() below recompose the moment an override changes.
             var epgOverrideMap by remember { mutableStateOf(app.epgOverrides.all()) }
             var epgOverrideRevision by remember { mutableIntStateOf(0) }
+            // Bumped when a channel edit or a parental setting changes, so the
+            // filtered catalogue below is rebuilt.
+            var editRevision by remember { mutableIntStateOf(0) }
+            var prompt by remember { mutableStateOf<io.tapper.firetv.ui.PromptRequest?>(null) }
             // Same "mirror preferences into Compose state" pattern as
             // epgOverrideMap above: ReminderStore/RecordingStore are plain
             // SharedPreferences, so nothing here recomposes on its own when
@@ -714,7 +720,75 @@ class MainActivity : ComponentActivity() {
 
             // The catalogue survives navigation: it lives on the Browse entry
             // at the bottom of the stack, so Settings and Search do not lose it.
-            val catalogue = stack.filterIsInstance<Screen.Browse>().lastOrNull()?.catalogue
+            val rawCatalogue = stack.filterIsInstance<Screen.Browse>().lastOrNull()?.catalogue
+            // Hidden, locked and renamed channels, applied once here so Browse,
+            // Search, My Teams and Settings all see the same list.
+            val catalogue = remember(rawCatalogue, editRevision) {
+                rawCatalogue?.withEdits(app.channelEdits, app.parental, kids = app.profiles.active().kids)
+            }
+
+            /** Runs [action] after the right PIN, or at once when no PIN is set. */
+            fun withPin(title: String, action: () -> Unit) {
+                if (!app.parental.hasPin) { action(); return }
+                fun ask(message: String?) {
+                    prompt = io.tapper.firetv.ui.PromptRequest(title, hint = "PIN", numeric = true, secret = true, message = message) { pin ->
+                        if (app.parental.check(pin)) action() else ask("Wrong PIN, try again.")
+                    }
+                }
+                ask(null)
+            }
+
+            fun channelActions(ch: Channel): List<MenuAction> {
+                val edits = app.channelEdits
+                val hidden = edits.isHidden(ch)
+                return listOf(
+                    MenuAction("Rename...") {
+                        withPin("Enter the PIN to edit channels") {
+                            prompt = io.tapper.firetv.ui.PromptRequest(
+                                "Rename ${ch.name}", hint = "Leave empty to use the provider's name",
+                                initial = edits.nameFor(ch) ?: ch.name,
+                            ) { name ->
+                                // Saving the provider's own name clears the edit.
+                                val raw = rawCatalogue?.channels?.firstOrNull { it.id == ch.id && it.sourceId == ch.sourceId }?.name
+                                edits.rename(ch, name.takeUnless { it.isBlank() || it == raw })
+                                editRevision++
+                            }
+                        }
+                    },
+                    MenuAction("Change number...") {
+                        withPin("Enter the PIN to edit channels") {
+                            prompt = io.tapper.firetv.ui.PromptRequest(
+                                "Channel number for ${ch.name}", hint = "Leave empty to use the provider's number",
+                                initial = (edits.numberFor(ch) ?: ch.number)?.toString().orEmpty(), numeric = true,
+                            ) { n -> edits.renumber(ch, n.toIntOrNull()); editRevision++ }
+                        }
+                    },
+                    MenuAction(if (hidden) "Unhide channel" else "Hide channel") {
+                        withPin("Enter the PIN to edit channels") { edits.setHidden(ch, !hidden); editRevision++ }
+                    },
+                )
+            }
+
+            fun categoryActions(kind: ContentKind, category: String): List<MenuAction> {
+                val hidden = category in app.channelEdits.hiddenCategories()
+                val locked = category in app.parental.lockedCategories()
+                return listOf(
+                    MenuAction(if (hidden) "Unhide category" else "Hide category") {
+                        withPin("Enter the PIN to edit categories") {
+                            app.channelEdits.setCategoryHidden(category, !hidden); editRevision++
+                        }
+                    },
+                    MenuAction(if (locked) "Unlock category" else "Lock with PIN") {
+                        if (!app.parental.hasPin) {
+                            Toast.makeText(this@MainActivity, "Set a PIN first in Settings > Parental controls", Toast.LENGTH_LONG).show()
+                        } else {
+                            withPin(if (locked) "Enter the PIN to unlock $category" else "Enter the PIN to lock $category") {
+                                app.parental.setLocked(category, !locked); editRevision++
+                            }
+                        }
+                    },
+                )
+            }
             // Channels the GarysTV extra guides cover by name (Marquee Sports
             // Network from a paid plan, ...), keyed like the manual overrides.
             val guideNameMatches = remember(catalogue, garysGuides) {
@@ -1129,14 +1203,34 @@ class MainActivity : ComponentActivity() {
                         tmdbApiKey = tmdbApiKey,
                         onSetTmdbApiKey = { k -> app.movieMetadata.apiKey = k; tmdbApiKey = k },
                         onClearMovieInfoCache = { app.movieMetadata.clearCache() },
+                        household = {
+                            io.tapper.firetv.ui.HouseholdSettings(
+                                profiles = app.profiles,
+                                edits = app.channelEdits,
+                                parental = app.parental,
+                                setup = app.setupSync,
+                                syncConfigured = app.sync.backendOrNull() != null,
+                                onSwitchProfile = { id -> app.switchProfile(id); recreate() },
+                                onChanged = { editRevision++ },
+                                onRestart = {
+                                    // Every store re-reads its file on a fresh start.
+                                    val i = packageManager.getLaunchIntentForPackage(packageName)
+                                    if (i != null) {
+                                        i.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        startActivity(i)
+                                    }
+                                    Runtime.getRuntime().exit(0)
+                                },
+                            )
+                        },
                     )
 
                     current is Screen.Browse -> {
                     // Hoisted out of the catalogue = ... argument below so
                     // onPlay can also reach it, for allLiveChannels - see the
                     // Playing data class above.
-                    val resolvedCatalogue = remember(current.catalogue, logoFolderIndex) {
-                        current.catalogue.withResolvedLogos(logoFolderIndex)
+                    val resolvedCatalogue = remember(catalogue, current.catalogue, logoFolderIndex) {
+                        (catalogue ?: current.catalogue).withResolvedLogos(logoFolderIndex)
                     }
                     BrowseScreen(
                         // A no-op when no folder is configured for this
@@ -1274,6 +1368,8 @@ class MainActivity : ComponentActivity() {
                         onOpenRecordings = { refreshRecordings(); push(Screen.Recordings) },
                         onOpenTeams = { push(Screen.Teams) },
                         multiviewCount = multiview.size,
+                        channelActions = ::channelActions,
+                        categoryActions = ::categoryActions,
                         onAddToMultiview = { ch ->
                             val max = io.tapper.firetv.ui.multiviewTiles(this@MainActivity)
                             when {
@@ -1454,6 +1550,9 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                }
+                prompt?.let { req ->
+                    io.tapper.firetv.ui.TextPrompt(req, onDismiss = { if (prompt === req) prompt = null })
                 }
                 }
             }

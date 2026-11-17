@@ -125,6 +125,9 @@ class WatchSync(
         }
     }
 
+    /** The sync folder, for other files that travel with it (SetupSync). */
+    fun backendOrNull(): SyncBackend? = backend()
+
     fun describe(): String = backend()?.label ?: "Not set up"
 
     data class Result(val pulledFrom: Int, val changed: Int, val pushed: Boolean, val label: String)
