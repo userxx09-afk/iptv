@@ -123,7 +123,7 @@ struct SearchView: View {
                 onPlay: { picked in
                     guideChannel = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        playingLive = true
+                        playingLive = picked.kind == ContentKind.live
                         playing = picked
                     }
                 },

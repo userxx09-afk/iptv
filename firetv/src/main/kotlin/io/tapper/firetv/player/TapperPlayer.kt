@@ -6,6 +6,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.SystemClock
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Metadata
 import androidx.media3.common.PlaybackException
@@ -163,6 +164,36 @@ class TapperPlayer(
         p.seekTo(if (dur > 0) target.coerceIn(0, dur) else target.coerceAtLeast(0))
     }
 
+    private val settings get() = (context.applicationContext as? io.tapper.firetv.TapperApp)?.playerSettings
+
+    /** Captions on or off, and the preferred audio/subtitle language, from
+     *  Settings. CEA-608 captions inside a live stream show up as an
+     *  undetermined-language text track, so those are allowed explicitly. */
+    private fun applyTrackPrefs(exo: ExoPlayer) {
+        val s = settings ?: return
+        val lang = s.preferredLanguage.takeIf { it.isNotBlank() }
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setPreferredAudioLanguage(lang)
+            .setPreferredTextLanguage(lang)
+            .setSelectUndeterminedTextLanguage(true)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !s.captions)
+            .build()
+    }
+
+    fun captionsOn(): Boolean = settings?.captions == true
+
+    /** Flips captions for this and every later stream; returns the new state. */
+    fun toggleCaptions(): Boolean {
+        val s = settings ?: return false
+        s.captions = !s.captions
+        player?.let { applyTrackPrefs(it) }
+        return s.captions
+    }
+
+    /** True when the stream playing now has a caption/subtitle track at all. */
+    fun hasCaptionTrack(): Boolean =
+        player?.currentTracks?.groups?.any { it.type == C.TRACK_TYPE_TEXT } == true
+
     /** Milliseconds of mute left; 0 when sound is on. */
     fun muteRemainingMs(): Long =
         if (muteUntilMs == 0L) 0L else (muteUntilMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
@@ -264,6 +295,7 @@ class TapperPlayer(
                 view?.player = it
             }
 
+        applyTrackPrefs(exo)
         // A rebuilt player starts at full volume; a mute in progress carries over.
         exo.volume = if (muteRemainingMs() > 0L) 0f else 1f
         exo.setMediaItem(MediaItem.fromUri(stream.url))

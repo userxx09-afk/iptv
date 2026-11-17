@@ -138,8 +138,13 @@ struct ContentView: View {
                     guideChannel = nil
                     // Let the sheet finish closing before the player opens.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: picked.id)
-                        play(picked, live: true)
+                        // A catch-up programme comes back as an on-demand
+                        // item (seekable), not the live channel.
+                        let live = picked.kind == ContentKind.live
+                        if live {
+                            StartupStore.shared.recordLastLive(sourceId: activeSource.id, channelId: picked.id)
+                        }
+                        play(picked, live: live)
                     }
                 },
                 onClose: { guideChannel = nil }

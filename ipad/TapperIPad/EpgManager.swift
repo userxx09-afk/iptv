@@ -361,7 +361,8 @@ final class EpgManager {
         if Task.isCancelled { return false }
         status.post("Guide: adding supplemental listings...", refreshing: true)
         let extra = await mergeSupplemental(sourceId: source.id, now: now)
-        EpgDatabase.shared.prune(before: now - 6 * 3600)
+        // A day back, for catch-up on channels that have an archive.
+        EpgDatabase.shared.prune(before: now - 24 * 3600)
 
         var text: String
         if primaryOk {
@@ -438,10 +439,14 @@ final class EpgManager {
     func schedule(for channel: Channel) async -> [EpgProgramme] {
         guard let id = source?.id else { return [] }
         let keys = EpgNowStore.shared.candidateKeys(for: channel)
+        // A channel with an archive also lists what already aired today,
+        // so it can be played back (catch-up).
+        let hasArchive = channel.catchup != nil
         return await Task.detached(priority: .userInitiated) {
             let now = Int(Date().timeIntervalSince1970)
+            let from = hasArchive ? now - 24 * 3600 : now
             for key in keys {
-                let rows = EpgDatabase.shared.upcoming(id, channelId: key, now: now)
+                let rows = EpgDatabase.shared.upcoming(id, channelId: key, now: from, limit: hasArchive ? 60 : 30)
                 if !rows.isEmpty { return rows }
             }
             return []

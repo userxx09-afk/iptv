@@ -1,5 +1,6 @@
 package io.tapper.core.catalogue
 
+import io.tapper.core.model.Catchup
 import io.tapper.core.model.Channel
 import io.tapper.core.model.ContentKind
 import io.tapper.core.model.StreamRef
@@ -78,6 +79,12 @@ object CatalogueCodec {
             }
             first = false
         }
+        // Field 13, added with catch-up. Lines written before it simply have
+        // twelve fields and read back with no archive.
+        channel.catchup?.let { c ->
+            sb.append(FIELD).append(clean(c.template)).append(PART).append(c.days)
+                .append(PART).append(c.offsetMinutes)
+        }
         return sb.toString()
     }
 
@@ -124,6 +131,11 @@ object CatalogueCodec {
             kind = kind,
             categories = categories,
             seriesId = f[9].ifEmpty { null },
+            catchup = f.getOrNull(12)?.takeIf { it.isNotEmpty() }?.split(PART)?.let { p ->
+                val template = p[0]
+                if (template.isEmpty()) null
+                else Catchup(template, p.getOrNull(1)?.toIntOrNull() ?: 1, p.getOrNull(2)?.toIntOrNull() ?: 0)
+            },
         )
     }
 

@@ -15,6 +15,8 @@ struct SettingsView: View {
     @State private var buffer = PlayerSettingsStore.shared.bufferSize
     @State private var mobileQuality = PlayerSettingsStore.shared.mobileQuality
     @State private var muteMinutes = PlayerSettingsStore.shared.muteMinutes
+    @State private var captions = PlayerSettingsStore.shared.captions
+    @State private var language = PlayerSettingsStore.shared.preferredLanguage
     @State private var tmdbKey = MovieMetadataStore.shared.apiKey
     @State private var infoCleared = false
     @State private var confirmClearWatch = false
@@ -231,6 +233,18 @@ struct SettingsView: View {
                     }
                     .onChange(of: muteMinutes) { _, newValue in
                         PlayerSettingsStore.shared.muteMinutes = newValue
+                    }
+                    Toggle("Captions", isOn: $captions)
+                        .onChange(of: captions) { _, newValue in
+                            PlayerSettingsStore.shared.captions = newValue
+                        }
+                    Picker("Audio and subtitle language", selection: $language) {
+                        ForEach(PlayerSettingsStore.languageChoices, id: \.code) { choice in
+                            Text(choice.label).tag(choice.code)
+                        }
+                    }
+                    .onChange(of: language) { _, newValue in
+                        PlayerSettingsStore.shared.preferredLanguage = newValue
                     }
                 } header: {
                     Text("Playback")

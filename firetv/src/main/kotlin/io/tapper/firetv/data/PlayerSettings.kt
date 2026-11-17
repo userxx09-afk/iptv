@@ -69,7 +69,26 @@ class PlayerSettingsStore(context: Context) {
         get() = prefs.getInt("mute_minutes", DEFAULT_MUTE_MINUTES).coerceIn(1, MAX_MUTE_MINUTES)
         set(v) = prefs.edit().putInt("mute_minutes", v.coerceIn(1, MAX_MUTE_MINUTES)).apply()
 
+    /** Show closed captions / subtitles when the stream carries them
+     *  (CEA-608 in most US live channels). Toggled from Settings > Playback
+     *  or the Menu button while watching. */
+    var captions: Boolean
+        get() = prefs.getBoolean("captions", false)
+        set(v) = prefs.edit().putBoolean("captions", v).apply()
+
+    /** Preferred audio and subtitle language as an ISO 639 code ("en",
+     *  "es"), or blank for whatever the stream marks as default. Without
+     *  one, a stream with several audio tracks can open on any of them. */
+    var preferredLanguage: String
+        get() = prefs.getString("language", "") ?: ""
+        set(v) = prefs.edit().putString("language", v.trim().lowercase()).apply()
+
     companion object {
+        /** Offered in Settings; code to label. */
+        val LANGUAGE_CHOICES = listOf(
+            "" to "Stream default", "en" to "English", "es" to "Spanish", "fr" to "French",
+            "de" to "German", "pt" to "Portuguese",
+        )
         const val DEFAULT_MUTE_MINUTES = 3
         const val MAX_MUTE_MINUTES = 15
         val MUTE_MINUTE_CHOICES = listOf(1, 2, 3, 4, 5, 8, 10)

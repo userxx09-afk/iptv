@@ -235,12 +235,37 @@ class XtreamClient(
                         streams = listOf(StreamRef(liveUrl(id, ext), 0)),
                         kind = ContentKind.LIVE,
                         categories = listOfNotNull(parsed.category),
+                        catchup = archiveFor(id, o["tv_archive"], o["tv_archive_duration"]),
                     )
                 )
                 i++
             }
         }
-        return out
+        return withServerClock(out)
+    }
+
+    /** Catch-up for one live stream, when the panel archives it. The clock
+     *  offset is filled in afterwards by [withServerClock]. */
+    private fun archiveFor(streamId: String, archive: String?, days: String?): io.tapper.core.model.Catchup? {
+        if (archive?.trim() != "1") return null
+        return io.tapper.core.catchup.CatchupUrl.xtream(
+            base, enc(username), enc(password), streamId, days?.trim()?.toIntOrNull() ?: 1, 0,
+        )
+    }
+
+    /** Xtream reads a timeshift start in the panel's local time, so channels
+     *  with an archive need the panel's clock offset. One small extra call,
+     *  and only when some channel has an archive. */
+    private fun withServerClock(channels: List<Channel>): List<Channel> {
+        if (channels.none { it.catchup != null }) return channels
+        val offset = runCatching {
+            val info = JSONObject(fetch(api(null))).optJSONObject("server_info")
+            io.tapper.core.catchup.CatchupUrl.serverOffsetMinutes(
+                info?.lenientString("time_now"), info?.lenientLong("timestamp_now"),
+            )
+        }.getOrDefault(0)
+        if (offset == 0) return channels
+        return channels.map { c -> c.catchup?.let { c.copy(catchup = it.copy(offsetMinutes = offset)) } ?: c }
     }
 
     /**

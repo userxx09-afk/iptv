@@ -96,9 +96,10 @@ final class XmltvStreamParser: NSObject, XMLParserDelegate {
 
     init(wanted: Set<String>?, now: Int, maxRows: Int, emit: @escaping (EpgProgramme) -> Void) {
         self.wanted = wanted
-        // A little history and about a day and a half ahead; the rest is
-        // dead weight on a device with a 100MB+ guide.
-        self.floor = now - 3 * 3600
+        // A day of history (what catch-up can play back) and about a day
+        // and a half ahead; the rest is dead weight on a device with a
+        // 100MB+ guide.
+        self.floor = now - 24 * 3600
         self.ceiling = now + 36 * 3600
         self.maxRows = maxRows
         self.emit = emit

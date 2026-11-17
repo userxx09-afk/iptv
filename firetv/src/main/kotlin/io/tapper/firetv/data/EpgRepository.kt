@@ -38,8 +38,9 @@ class EpgRepository(
          *  complete; refreshing it every 6 hours cost a 100MB download and a
          *  full parse for no visible difference. */
         private const val STALE_AFTER_MS = 12 * 60 * 60 * 1000L
-        /** Keep a little history and three days ahead; the rest is dead weight. */
-        private const val KEEP_BEFORE_MS = 6 * 60 * 60 * 1000L
+        /** Keep a day of history (what catch-up plays back) and three days
+         *  ahead; the rest is dead weight. */
+        private const val KEEP_BEFORE_MS = 24 * 60 * 60 * 1000L
         private const val KEEP_AFTER_MS = 72 * 60 * 60 * 1000L
         private const val MAX_ROWS = 400_000
 

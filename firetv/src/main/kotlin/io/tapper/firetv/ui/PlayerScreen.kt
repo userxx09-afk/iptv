@@ -185,6 +185,16 @@ fun PlayerScreen(
         )
     }
 
+    fun toggleCaptions() {
+        val on = player.toggleCaptions()
+        val note = when {
+            !on -> "Captions off"
+            player.hasCaptionTrack() -> "Captions on"
+            else -> "Captions on (this stream doesn't carry any)"
+        }
+        android.widget.Toast.makeText(context, note, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     fun toggleMute() {
         val minutes = (context.applicationContext as? io.tapper.firetv.TapperApp)
             ?.playerSettings?.muteMinutes ?: 3
@@ -472,7 +482,12 @@ fun PlayerScreen(
                     Key.DirectionCenter, Key.Enter ->
                         if (channel.kind == ContentKind.LIVE) { overlayVisible = !overlayVisible; true }
                         else { showControls = true; true }
-                    else -> false
+                    // Menu (the three-line button) or a remote's own CC key
+                    // turns captions on and off.
+                    Key.Menu -> { toggleCaptions(); true }
+                    else -> if (e.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_CAPTIONS) {
+                        toggleCaptions(); true
+                    } else false
                 }
             }
     ) {

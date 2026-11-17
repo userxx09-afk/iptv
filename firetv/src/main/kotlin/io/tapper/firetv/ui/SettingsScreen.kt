@@ -90,6 +90,10 @@ fun SettingsScreen(
     onSetResumeLast: (Boolean) -> Unit,
     bufferSize: BufferSize,
     onSetBufferSize: (BufferSize) -> Unit,
+    captions: Boolean = false,
+    onSetCaptions: (Boolean) -> Unit = {},
+    preferredLanguage: String = "",
+    onSetPreferredLanguage: (String) -> Unit = {},
     /** Minutes the Right-button commercial mute lasts. */
     muteMinutes: Int,
     onSetMuteMinutes: (Int) -> Unit,
@@ -548,6 +552,27 @@ fun SettingsScreen(
         Spacer(Modifier.height(6.dp))
         Text(
             bufferSize.description + " Takes effect the next time something is played.",
+            style = MaterialTheme.typography.bodyMedium, color = Dim,
+        )
+
+        Spacer(Modifier.height(28.dp))
+        Text("CAPTIONS AND LANGUAGE", style = MaterialTheme.typography.bodyMedium, color = Dim)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Captions off", !captions) { onSetCaptions(false) }
+            Chip("Captions on", captions) { onSetCaptions(true) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            io.tapper.firetv.data.PlayerSettingsStore.LANGUAGE_CHOICES.forEach { (code, label) ->
+                Chip(label, preferredLanguage == code) { onSetPreferredLanguage(code) }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Captions show when the channel or film carries them. Press the Menu button " +
+                "(three lines) while watching to turn them on or off. The language picks the " +
+                "audio track and subtitles when a stream offers more than one.",
             style = MaterialTheme.typography.bodyMedium, color = Dim,
         )
 

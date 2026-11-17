@@ -1,5 +1,6 @@
 package io.tapper.core.playlist
 
+import io.tapper.core.catchup.CatchupUrl
 import io.tapper.core.model.Channel
 import io.tapper.core.model.ContentKind
 import io.tapper.core.model.Country
@@ -70,6 +71,9 @@ object M3uParser {
 
     fun parse(content: String, sourceId: String): M3uResult {
         var declaredEpgUrls: List<String> = emptyList()
+        // #EXTM3U's own attributes: some providers declare catch-up once here
+        // for the whole playlist rather than on every entry.
+        var headerAttrs: Map<String, String> = emptyMap()
         var pending: Pending? = null
         var autoNumber = 0
         val byKey = LinkedHashMap<String, Channel>()
@@ -82,6 +86,7 @@ object M3uParser {
                 line.startsWith("#EXTM3U") -> {
                     // One attribute can hold several guides: x-tvg-url="a.gz,b.gz"
                     val a = attributes(line)
+                    headerAttrs = a
                     declaredEpgUrls = (a["url-tvg"] ?: a["x-tvg-url"] ?: a["tvg-url"])
                         ?.split(',')?.map { it.trim() }?.filter { it.startsWith("http") }
                         .orEmpty()
@@ -118,6 +123,7 @@ object M3uParser {
                     }
 
                     autoNumber++
+                    val kind = classify(line)
                     byKey[key] = Channel(
                         id = key,
                         sourceId = sourceId,
@@ -128,8 +134,10 @@ object M3uParser {
                         countryCode = Country.fromTvgId(tvgId),
                         epgChannelId = tvgId,
                         streams = listOf(StreamRef(line, 0, e.headers)),
-                        kind = classify(line),
+                        kind = kind,
                         categories = splitCategories(e.group),
+                        catchup = if (kind == ContentKind.LIVE)
+                            CatchupUrl.fromM3u(line, e.attrs, headerAttrs) else null,
                     )
                 }
             }
@@ -141,6 +149,7 @@ object M3uParser {
         val displayName: String, val tvgId: String?, val tvgName: String?,
         val logo: String?, val group: String?, val chNo: Int?,
         val headers: Map<String, String>,
+        val attrs: Map<String, String> = emptyMap(),
     )
 
     private fun parseExtInf(line: String): Pending {
@@ -161,6 +170,7 @@ object M3uParser {
             logo = a["tvg-logo"], group = a["group-title"],
             chNo = a["tvg-chno"]?.toIntOrNull(),
             headers = headers,
+            attrs = a,
         )
     }
 

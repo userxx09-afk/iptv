@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import io.tapper.core.catchup.CatchupUrl
 import io.tapper.core.model.Channel
 import io.tapper.core.model.ContentKind
 import io.tapper.core.model.StreamRef
@@ -269,6 +270,8 @@ class MainActivity : ComponentActivity() {
             // next cross-device sync.
             var watchRevision by remember { mutableIntStateOf(0) }
             var bufferSize by remember { mutableStateOf(app.playerSettings.bufferSize) }
+            var captionsOn by remember { mutableStateOf(app.playerSettings.captions) }
+            var preferredLanguage by remember { mutableStateOf(app.playerSettings.preferredLanguage) }
             var muteMinutes by remember { mutableStateOf(app.playerSettings.muteMinutes) }
             var cacheHours by remember { mutableStateOf(app.playerSettings.cacheHours) }
             var episodes by remember { mutableStateOf<List<Channel>>(emptyList()) }
@@ -1082,6 +1085,12 @@ class MainActivity : ComponentActivity() {
                         onSetBufferSize = {
                             bufferSize = it; app.playerSettings.bufferSize = it
                         },
+                        captions = captionsOn,
+                        onSetCaptions = { captionsOn = it; app.playerSettings.captions = it },
+                        preferredLanguage = preferredLanguage,
+                        onSetPreferredLanguage = {
+                            preferredLanguage = it; app.playerSettings.preferredLanguage = it
+                        },
                         muteMinutes = muteMinutes,
                         onSetMuteMinutes = {
                             muteMinutes = it; app.playerSettings.muteMinutes = it
@@ -1180,11 +1189,27 @@ class MainActivity : ComponentActivity() {
                         movieInfoLastError = { app.movieMetadata.lastError },
                         tmdbKeyConfigured = tmdbApiKey.isNotBlank(),
                         scheduleFor = { ch ->
-                            app.epgDb.upcoming(
-                                guideSourceIds,
-                                epgIdFor(ch),
-                                System.currentTimeMillis(),
+                            val now = System.currentTimeMillis()
+                            // A channel with an archive also lists what
+                            // already aired today, for catch-up.
+                            if (ch.catchup != null) {
+                                app.epgDb.upcoming(guideSourceIds, epgIdFor(ch), now - 24 * 60 * 60 * 1000L, limit = 40)
+                            } else {
+                                app.epgDb.upcoming(guideSourceIds, epgIdFor(ch), now)
+                            }
+                        },
+                        canCatchUp = { ch, p ->
+                            CatchupUrl.canPlay(ch, p.startUtc, System.currentTimeMillis())
+                        },
+                        onCatchUp = { ch, p ->
+                            val archived = CatchupUrl.archiveChannel(
+                                ch, p.title, p.startUtc, p.endUtc, System.currentTimeMillis(),
                             )
+                            if (archived == null) {
+                                Toast.makeText(this@MainActivity, "That programme is no longer in ${ch.name}'s archive", Toast.LENGTH_LONG).show()
+                            } else {
+                                startPlayback(Playing(listOf(archived), 0))
+                            }
                         },
                         epgIdFor = ::epgIdFor,
                         onSetGuideChannel = { push(Screen.EpgPick(it)) },
