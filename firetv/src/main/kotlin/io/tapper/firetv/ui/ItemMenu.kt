@@ -1,5 +1,8 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.skinFocusBar
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,8 +45,8 @@ fun ItemMenu(
             Modifier
                 .widthIn(min = 380.dp, max = 560.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(Backdrop)
-                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp))
+                .skinBackground()
+                .border(1.dp, panelTint(0.10f), RoundedCornerShape(14.dp))
                 .padding(vertical = 20.dp),
         ) {
             Text(
@@ -83,7 +86,7 @@ private fun MenuRow(label: String, onClick: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.Transparent)
+            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.Transparent).skinFocusBar(focused)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 24.dp, vertical = 14.dp),
         contentAlignment = Alignment.CenterStart,

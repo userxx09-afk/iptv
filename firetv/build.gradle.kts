@@ -107,6 +107,12 @@ android {
     buildFeatures { compose = true; buildConfig = true }
     sourceSets["main"].java.srcDirs("src/main/kotlin")
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    // Robolectric screenshot tests (src/test, SkinScreenshots). Only run by
+    // the "Fire TV skin screenshots" workflow; the release build ignores them.
+    testOptions.unitTests {
+        isIncludeAndroidResources = true
+        all { it.systemProperty("roborazzi.test.record", "true") }
+    }
 }
 dependencies {
     implementation(project(":shared"))
@@ -136,4 +142,13 @@ dependencies {
     implementation(libs.work.runtime)
     // Reads a user-picked SAF folder's contents (custom logo folder override).
     implementation(libs.documentfile)
+
+    // Screenshot tests only (see testOptions above); nothing here ships.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.26.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.26.0")
+    testImplementation(platform(libs.compose.bom))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

@@ -129,6 +129,7 @@ class TapperApp : Application() {
     override fun onCreate() {
         super.onCreate()
         installCrashRecorder()
+        io.tapper.firetv.ui.theme.UiSkin.load(this)
         vault = CredentialVault(this)
         sourceStore = SourceStore(this)
         profiles = io.tapper.firetv.data.ProfileStore(this)

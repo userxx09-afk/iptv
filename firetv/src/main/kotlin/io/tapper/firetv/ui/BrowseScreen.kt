@@ -1,5 +1,14 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.Accent
+import io.tapper.firetv.ui.theme.GarysSub
+import io.tapper.firetv.ui.theme.GarysYellow
+import io.tapper.firetv.ui.theme.isGarysSkin
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.layout.ContentScale
+import io.tapper.firetv.ui.theme.skinFocusBar
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -1301,7 +1310,7 @@ fun BrowseScreen(
     }
 
     Row(
-        Modifier.fillMaxSize().background(Backdrop)
+        Modifier.fillMaxSize().skinBackground()
             .padding(horizontal = 48.dp, vertical = 27.dp)
     ) {
         // NAV
@@ -1415,7 +1424,7 @@ fun BrowseScreen(
                 // full 300.dp nav width (this whole branch only composes
                 // there), so it never needs to shrink or hide itself.
                 Image(
-                    painter = painterResource(R.mipmap.ic_launcher),
+                    painter = painterResource(if (isGarysSkin) R.drawable.garys_logo else R.mipmap.ic_launcher),
                     contentDescription = null,
                     modifier = Modifier
                         .padding(top = 12.dp, bottom = 8.dp)
@@ -1632,13 +1641,13 @@ internal fun clockText(): String {
 }
 
 @Composable
-private fun SourceHeader(source: TvSource, epgStatus: String?, onClick: () -> Unit) {
+internal fun SourceHeader(source: TvSource, epgStatus: String?, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Column(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+            .background(if (focused) Focus.copy(alpha = 0.18f) else panelTint(0.05f)).skinFocusBar(focused)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
@@ -1647,6 +1656,25 @@ private fun SourceHeader(source: TvSource, epgStatus: String?, onClick: () -> Un
         var clock by remember { mutableStateOf(clockText()) }
         LaunchedEffect(Unit) {
             while (true) { delay(10_000); clock = clockText() }
+        }
+        if (isGarysSkin) {
+            // GarysTV's top-left brand: the round logo in a red ring, then
+            // GARY'S TV with the TV in red.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(R.drawable.garys_logo),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(40.dp).clip(CircleShape)
+                        .border(2.dp, Accent, CircleShape),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text("GARY'S", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold, color = Ink)
+                Text(" TV", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold, color = Accent)
+            }
+            Spacer(Modifier.height(10.dp))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("SOURCE", style = MaterialTheme.typography.bodyMedium, color = Dim, modifier = Modifier.weight(1f))
@@ -1668,10 +1696,13 @@ internal fun Chip(label: String, active: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(18.dp))
             .background(
-                if (active || focused) Focus.copy(alpha = if (active) 0.28f else 0.16f)
-                else Color.White.copy(alpha = 0.06f)
+                // GarysTV's selected tab is solid red (.tab.on in its styles.css).
+                if (active && isGarysSkin) Accent
+                else if (active || focused) Focus.copy(alpha = if (active) 0.28f else 0.16f)
+                else panelTint(0.06f)
             )
-            .border(1.dp, if (focused || active) Focus else Color.Transparent, RoundedCornerShape(18.dp))
+            .border(if (focused && isGarysSkin) 2.dp else 1.dp,
+                if (focused || active) Focus else Color.Transparent, RoundedCornerShape(18.dp))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
@@ -1682,7 +1713,7 @@ internal fun Chip(label: String, active: Boolean, onClick: () -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RailRow(
+internal fun RailRow(
     title: String,
     subtitle: String,
     selected: Boolean,
@@ -1698,7 +1729,7 @@ private fun RailRow(
     Row(
         modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.Transparent)
+            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.Transparent).skinFocusBar(focused)
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
                 RoundedCornerShape(8.dp))
             .selectable(
@@ -1728,7 +1759,7 @@ private fun RailRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChannelRow(
+internal fun ChannelRow(
     channel: Channel,
     favorite: Boolean,
     pinned: Boolean = false,
@@ -1746,7 +1777,7 @@ private fun ChannelRow(
     Row(
         modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f))
+            .background(if (focused) Focus.copy(alpha = 0.18f) else panelTint(0.04f)).skinFocusBar(focused)
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
                 RoundedCornerShape(8.dp))
             .selectable(
@@ -1789,7 +1820,7 @@ private fun ChannelRow(
             Text(
                 programme?.title ?: channel.group ?: "",
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (programme != null) Focus else Dim,
+                color = if (programme != null) (if (isGarysSkin) GarysSub else Focus) else Dim,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = if (scrollAll || focused) Modifier.basicMarquee(
                     iterations = Int.MAX_VALUE, initialDelayMillis = 800, repeatDelayMillis = 1500,
@@ -1802,7 +1833,7 @@ private fun ChannelRow(
             Spacer(Modifier.width(12.dp))
         }
         if (favorite) {
-            Text("*", style = MaterialTheme.typography.titleMedium, color = Focus)
+            Text("*", style = MaterialTheme.typography.titleMedium, color = if (isGarysSkin) GarysYellow else Focus)
             Spacer(Modifier.width(12.dp))
         }
         if (channel.streams.size > 1) {
@@ -1832,7 +1863,7 @@ private fun CollapsedNavIcon(
             .width(width)
             .fillMaxHeight()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+            .background(if (focused) Focus.copy(alpha = 0.18f) else panelTint(0.05f)).skinFocusBar(focused)
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
                 RoundedCornerShape(8.dp))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -1846,7 +1877,7 @@ private fun CollapsedNavIcon(
                 .width(48.dp)
                 .height(30.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(if (focused) Focus.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.10f)),
+                .background(if (focused) Focus.copy(alpha = 0.35f) else panelTint(0.10f)),
             contentAlignment = Alignment.Center,
         ) {
             Text(glyph, style = MaterialTheme.typography.bodyMedium,

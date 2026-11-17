@@ -1,5 +1,7 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,7 +51,7 @@ fun AddSourceScreen(
     var epg by remember { mutableStateOf("") }
 
     Column(
-        Modifier.fillMaxSize().background(Backdrop)
+        Modifier.fillMaxSize().skinBackground()
             .padding(horizontal = 64.dp, vertical = 40.dp)
             .verticalScroll(rememberScrollState()),
     ) {
@@ -111,8 +113,8 @@ private fun Field(
     Box(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+            .background(panelTint(0.06f))
+            .border(1.dp, panelTint(0.14f), RoundedCornerShape(8.dp))
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         if (value.isEmpty() && hint.isNotEmpty()) {
@@ -144,7 +146,7 @@ private fun ModeChip(label: String, active: Boolean, onClick: () -> Unit) {
         Modifier.clip(RoundedCornerShape(20.dp))
             .background(
                 if (active || focused) Focus.copy(alpha = if (active) 0.28f else 0.16f)
-                else Color.White.copy(alpha = 0.06f)
+                else panelTint(0.06f)
             )
             .border(1.dp, if (focused || active) Focus else Color.Transparent, RoundedCornerShape(20.dp))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -168,7 +170,7 @@ private fun Button(label: String, enabled: Boolean = true, onClick: () -> Unit) 
         Modifier.clip(RoundedCornerShape(10.dp))
             .background(
                 when {
-                    !enabled -> Color.White.copy(alpha = 0.05f)
+                    !enabled -> panelTint(0.05f)
                     focused -> Focus.copy(alpha = 0.38f)
                     else -> Focus.copy(alpha = 0.16f)
                 }

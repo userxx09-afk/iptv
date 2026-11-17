@@ -1,5 +1,8 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.skinFocusBar
+import io.tapper.firetv.ui.theme.panelTint
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,7 +58,7 @@ fun RecordingsScreen(
     val sorted = remember(recordings) { recordings.sortedByDescending { it.startUtc } }
 
     Column(
-        Modifier.fillMaxSize().background(Backdrop)
+        Modifier.fillMaxSize().skinBackground()
             .padding(horizontal = 48.dp, vertical = 32.dp)
     ) {
         Text("Recordings", style = MaterialTheme.typography.headlineLarge, color = Ink)
@@ -130,7 +133,7 @@ private fun RecordingRow(
     Column(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(if (focused) Focus.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f))
+            .background(if (focused) Focus.copy(alpha = 0.18f) else panelTint(0.04f)).skinFocusBar(focused)
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
                 RoundedCornerShape(10.dp))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)

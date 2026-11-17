@@ -1,5 +1,6 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.CircularProgressIndicator
@@ -24,7 +25,7 @@ import io.tapper.firetv.ui.theme.Ink
  */
 @Composable
 fun LoadingScreen(message: String) {
-    Box(Modifier.fillMaxSize().background(Backdrop), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().skinBackground(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("TAPPER IPTV", style = MaterialTheme.typography.displayLarge, color = Ink)
             Spacer(Modifier.height(32.dp))

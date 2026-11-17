@@ -1,5 +1,6 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.panelTint
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -831,7 +832,7 @@ private fun SeekBar(
             .fillMaxWidth()
             .height(10.dp)
             .clip(RoundedCornerShape(5.dp))
-            .background(Color.White.copy(alpha = 0.22f))
+            .background(panelTint(0.22f))
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent, RoundedCornerShape(5.dp))
             .focusable(interactionSource = interaction)
             // Left/Right must be consumed here, not left to bubble - the
@@ -864,7 +865,7 @@ private fun ControlButton(label: String, modifier: Modifier = Modifier, onClick:
     Box(
         modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(if (focused) Focus.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.10f))
+            .background(if (focused) Focus.copy(alpha = 0.30f) else panelTint(0.10f))
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent, RoundedCornerShape(10.dp))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 12.dp),

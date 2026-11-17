@@ -1,5 +1,6 @@
 package io.tapper.firetv.ui
 
+import io.tapper.firetv.ui.theme.skinBackground
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -32,7 +33,7 @@ fun FailureScreen(
 ) {
     BackHandler { onSettings() }
 
-    Box(Modifier.fillMaxSize().background(Backdrop), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().skinBackground(), contentAlignment = Alignment.Center) {
         Column(
             Modifier.widthIn(max = 760.dp).padding(48.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
