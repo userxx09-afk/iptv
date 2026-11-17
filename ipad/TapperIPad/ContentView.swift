@@ -18,6 +18,9 @@ import TapperCore
 struct ContentView: View {
     @StateObject private var playlistLoader = PlaylistLoader()
     @StateObject private var xtreamLoader = XtreamLoader()
+    /// Free TV's channels, merged into the active source's live lineup when
+    /// Settings > Free TV > Show alongside is on.
+    @ObservedObject private var freeTv = FreeTvLoader.shared
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var sources: [TvSource] = SourceStore.shared.all()
@@ -25,6 +28,7 @@ struct ContentView: View {
 
     @State private var showSettings = false
     @State private var showSearch = false
+    @State private var showTeams = false
     @State private var showAddSource = false
     @State private var addSourceBusy = false
     @State private var addSourceError: String?
@@ -90,7 +94,7 @@ struct ContentView: View {
         NavigationStack {
             Group {
                 if !playlistLoader.channels.isEmpty {
-                    channelList(playlistLoader.channels, namespace: "playlist")
+                    channelList(withFreeTv(playlistLoader.channels), namespace: "playlist")
                 } else if xtreamLoader.isLoggedIn {
                     xtreamTabs
                 } else {
@@ -122,6 +126,16 @@ struct ContentView: View {
                 if hasContent {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
+                            showTeams = true
+                        } label: {
+                            Image(systemName: "sportscourt")
+                        }
+                        .accessibilityLabel("My Teams")
+                    }
+                }
+                if hasContent {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
                             showSearch = true
                         } label: {
                             Image(systemName: "magnifyingglass")
@@ -148,6 +162,17 @@ struct ContentView: View {
                     }
                 },
                 onClose: { guideChannel = nil }
+            )
+        }
+        .sheet(isPresented: $showTeams) {
+            TeamsView(
+                channels: withFreeTv(playlistLoader.channels.isEmpty ? xtreamLoader.liveChannels : playlistLoader.channels),
+                sourceId: activeSource.id,
+                onWatch: { channel in
+                    showTeams = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { play(channel, live: true) }
+                },
+                onClose: { showTeams = false }
             )
         }
         .sheet(isPresented: $showSearch) {
@@ -372,7 +397,7 @@ struct ContentView: View {
         EpgManager.shared.activate(
             source: activeSource,
             declaredEpgUrls: playlistLoader.declaredEpgUrls,
-            liveChannels: live
+            liveChannels: withFreeTv(live)
         )
     }
 
@@ -381,13 +406,24 @@ struct ContentView: View {
         AppLog.shared.loadStarted(sourceId: id, name: name)
     }
 
+    /// The active source's live channels, plus Free TV's under "Free TV · ..."
+    /// categories when Show alongside is on (and Free TV isn't itself active).
+    private func withFreeTv(_ channels: [Channel]) -> [Channel] {
+        guard FreeTvSettings.shared.showAlongside, activeSource.kind != .freeTv,
+              !freeTv.channels.isEmpty else { return channels }
+        return channels + freeTv.channels
+    }
+
     private func loadSource(_ source: TvSource) {
+        if FreeTvSettings.shared.showAlongside { FreeTvLoader.shared.loadIfNeeded() }
         startupNotice = nil
         beginLoadBreadcrumb(id: source.id, name: source.name)
         switch source.kind {
         case .m3u:
             playlistLoader.load(urlString: source.location)
             if !playlistLoader.isLoading { AppLog.shared.loadFinished() }
+        case .freeTv:
+            playlistLoader.loadFreeTv()
         case .xtream:
             guard let creds = CredentialVault.get(sourceId: source.id) else {
                 AppLog.shared.log("LOAD", "No saved login found for \"\(source.name)\"")
@@ -556,7 +592,7 @@ struct ContentView: View {
                     .padding(.horizontal)
             }
             TabView(selection: $selectedTab) {
-                channelList(xtreamLoader.liveChannels, namespace: "live")
+                channelList(withFreeTv(xtreamLoader.liveChannels), namespace: "live")
                     .tabItem { Label("Live", systemImage: "tv") }
                     .tag(0)
                 channelList(xtreamLoader.movies, namespace: "movie")

@@ -84,6 +84,38 @@ data class Listing(val startUtc: Long, val endUtc: Long, val title: String, val 
 
 data class ChannelMatch(val channelId: String, val score: Int, val why: String, val listing: Listing?)
 
+/**
+ * Runs [SportsMatching.match] over a provider's live channels - the logic
+ * Fire TV's TeamsScreen has, shared so the iPad gets the same answers. Only
+ * US/Canadian channels (or ones with no country) are offered by network name
+ * (an iptv-org list has a "FOX" in every country), but any channel whose
+ * guide shows the game counts. [epgIds] maps a channel id to the guide id
+ * its listings are under; [listings] holds listings by guide id.
+ */
+object ChannelMatcher {
+    data class Hit(val channel: io.tapper.core.model.Channel, val match: ChannelMatch)
+
+    fun matchChannels(
+        game: Game,
+        channels: List<io.tapper.core.model.Channel>,
+        epgIds: Map<String, String>,
+        listings: Map<String, List<Listing>>,
+    ): List<Hit> {
+        val home = setOf(null, "us", "ca", "pr")
+        val byId = HashMap<String, io.tapper.core.model.Channel>()
+        val refs = ArrayList<ChannelRef>()
+        for (ch in channels) {
+            if (ch.kind != io.tapper.core.model.ContentKind.LIVE) continue
+            val inGuide = listings.containsKey(epgIds[ch.id])
+            if (!inGuide && ch.countryCode?.lowercase() !in home) continue
+            byId[ch.id] = ch
+            refs.add(ChannelRef(ch.id, ch.name))
+        }
+        return SportsMatching.match(game, refs, { ref -> listings[epgIds[ref.id]].orEmpty() })
+            .mapNotNull { m -> byId[m.channelId]?.let { Hit(it, m) } }
+    }
+}
+
 object SportsMatching {
     // TV networks as ESPN names them -> how they show up in channel names.
     private val networks: List<Pair<String, Regex>> = listOf(

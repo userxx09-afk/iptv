@@ -139,7 +139,7 @@ struct SourceListView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(source.name)
-                                Text(source.kind == .xtream ? "Xtream" : "M3U playlist")
+                                Text(source.kind == .xtream ? "Xtream" : source.kind == .freeTv ? "Free TV" : "M3U playlist")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

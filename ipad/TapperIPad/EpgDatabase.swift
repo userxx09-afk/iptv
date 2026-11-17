@@ -182,6 +182,31 @@ final class EpgDatabase: @unchecked Sendable {
         return out
     }
 
+    /// Guide channel ids containing any word of `text`, with what is on now -
+    /// for picking a channel's guide by hand.
+    func guideIds(_ sourceId: String, matching text: String, now: Int, limit: Int = 60) -> [(id: String, title: String)] {
+        let words = text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init).filter { $0.count >= 2 }
+        guard let first = words.max(by: { $0.count < $1.count }) else { return [] }
+        let rows = select(
+            "SELECT ch, MAX(CASE WHEN start_utc <= ? AND end_utc > ? THEN title ELSE '' END) FROM epg " +
+                "WHERE source_id = ? AND ch LIKE ? GROUP BY ch LIMIT ?",
+            [.int(now), .int(now), .text(sourceId), .text("%" + first + "%"), .int(limit)]
+        ) { stmt -> (id: String, title: String) in
+            (Self.text(stmt, 0) ?? "", Self.text(stmt, 1) ?? "")
+        }
+        return rows
+    }
+
+    /// Listings starting between `from` and `to`, by guide channel id - for
+    /// matching a game to the channels that carry it (My Teams).
+    func startingBetween(_ sourceId: String, from: Int, to: Int) -> [String: [EpgProgramme]] {
+        let rows = select(
+            "SELECT ch, start_utc, end_utc, title, descr FROM epg WHERE source_id = ? AND start_utc >= ? AND start_utc < ?",
+            [.text(sourceId), .int(from), .int(to)]
+        ) { Self.programme($0) }
+        return Dictionary(grouping: rows, by: { $0.channelId })
+    }
+
     func upcoming(_ sourceId: String, channelId: String, now: Int, limit: Int = 30) -> [EpgProgramme] {
         select(
             "SELECT ch, start_utc, end_utc, title, descr FROM epg WHERE source_id = ? AND ch = ? AND end_utc > ? ORDER BY start_utc LIMIT ?",
