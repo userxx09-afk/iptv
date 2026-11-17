@@ -123,6 +123,25 @@ final class PlayerSettingsStore {
         set { defaults.set(max(1, min(newValue, 15)), forKey: "tapper.player.muteMinutes") }
     }
 
+    /// Show closed captions / subtitles when the stream carries them. The
+    /// iPad counterpart to Fire TV's captions setting.
+    var captions: Bool {
+        get { defaults.bool(forKey: "tapper.player.captions") }
+        set { defaults.set(newValue, forKey: "tapper.player.captions") }
+    }
+
+    /// Preferred audio and subtitle language ("en", "es"), or "" for the
+    /// stream's own default.
+    var preferredLanguage: String {
+        get { defaults.string(forKey: "tapper.player.language") ?? "" }
+        set { defaults.set(newValue, forKey: "tapper.player.language") }
+    }
+
+    static let languageChoices: [(code: String, label: String)] = [
+        ("", "Stream default"), ("en", "English"), ("es", "Spanish"),
+        ("fr", "French"), ("de", "German"), ("pt", "Portuguese"),
+    ]
+
     var mobileQuality: MobileQuality {
         get { MobileQuality(rawValue: defaults.string(forKey: "tapper.player.mobileQuality") ?? "") ?? .auto }
         set { defaults.set(newValue.rawValue, forKey: "tapper.player.mobileQuality") }

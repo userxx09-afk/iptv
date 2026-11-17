@@ -72,6 +72,7 @@ struct ChannelGuideView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             List {
                 Section {
                     HStack(spacing: 14) {
@@ -111,11 +112,20 @@ struct ChannelGuideView: View {
                         Text("No guide data for this channel.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(Array(rows.enumerated()), id: \.offset) { _, programme in
-                            row(programme)
+                        ForEach(Array(rows.enumerated()), id: \.offset) { index, programme in
+                            row(programme).id(index)
                         }
                     }
                 }
+            }
+            // With catch-up the list starts in the past; open it at what is
+            // on now instead.
+            .onChange(of: loaded) {
+                let now = Int(Date().timeIntervalSince1970)
+                if let live = rows.firstIndex(where: { $0.isAiring(at: now) }), live > 0 {
+                    proxy.scrollTo(live, anchor: .top)
+                }
+            }
             }
             .navigationTitle("Guide")
             .navigationBarTitleDisplayMode(.inline)
@@ -145,6 +155,9 @@ struct ChannelGuideView: View {
     private func row(_ programme: EpgProgramme) -> some View {
         let nowSeconds = Int(Date().timeIntervalSince1970)
         let airing = programme.isAiring(at: nowSeconds)
+        let past = programme.end <= nowSeconds
+        let archived = (airing || past) && CatchupUrl.shared.canPlay(
+            channel: channel, startUtcMs: Int64(programme.start) * 1000, nowUtcMs: Int64(nowSeconds) * 1000)
         return HStack(alignment: .top, spacing: 14) {
             Text(clock(programme.startDate))
                 .font(.subheadline.monospacedDigit())
@@ -154,6 +167,7 @@ struct ChannelGuideView: View {
                 HStack(spacing: 8) {
                     Text(programme.title)
                         .font(.body.weight(airing ? .semibold : .regular))
+                        .foregroundStyle(past && !archived ? Color.secondary : Color.primary)
                     if airing {
                         Text("NOW")
                             .font(.caption2.weight(.bold))
@@ -175,6 +189,26 @@ struct ChannelGuideView: View {
                 }
             }
             Spacer(minLength: 0)
+            if archived {
+                // Catch-up: play this programme from its start, from the
+                // provider's archive.
+                Button {
+                    if let item = CatchupUrl.shared.archiveChannel(
+                        channel: channel, title: programme.title,
+                        startUtcMs: Int64(programme.start) * 1000,
+                        endUtcMs: Int64(programme.end) * 1000,
+                        nowUtcMs: Int64(Date().timeIntervalSince1970 * 1000)
+                    ) {
+                        onPlay(item)
+                    }
+                } label: {
+                    Label(airing ? "Start over" : "Watch", systemImage: airing ? "backward.end.fill" : "play.circle")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(airing ? "Watch from the start" : "Watch (catch-up)")
+            }
             if programme.start > nowSeconds {
                 let set = reminders.has(channel: channel, programme: programme)
                 Button {

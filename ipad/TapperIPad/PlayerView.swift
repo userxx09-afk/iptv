@@ -227,6 +227,7 @@ struct PlayerView: View {
             HStack(spacing: 6) {
                 closeButton
                 Spacer()
+                captionsButton
                 muteButton
                 AirPlayButton()
                     .frame(width: 44, height: 44)
@@ -334,6 +335,20 @@ struct PlayerView: View {
                 .background(.black.opacity(0.45))
                 .clipShape(Capsule())
         }
+    }
+
+    /// Closed captions on or off, for this and every later stream.
+    private var captionsButton: some View {
+        Button {
+            controller.toggleCaptions()
+            scheduleHide()
+        } label: {
+            Image(systemName: controller.captionsOn ? "captions.bubble.fill" : "captions.bubble")
+                .font(.title3)
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel(controller.captionsOn ? "Turn captions off" : "Turn captions on")
     }
 
     private func mutePill(endsAt: Date) -> some View {

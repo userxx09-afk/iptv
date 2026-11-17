@@ -410,6 +410,11 @@ class PlaylistRepository(
             w.endObject()
         }
         w.endArray()
+        c.catchup?.let { cu ->
+            w.name("catchupTemplate").value(cu.template)
+            w.name("catchupDays").value(cu.days)
+            w.name("catchupOffset").value(cu.offsetMinutes)
+        }
         w.endObject()
     }
 
@@ -427,6 +432,9 @@ class PlaylistRepository(
         var epgChannelId: String? = null
         var kind = ContentKind.LIVE
         var seriesId: String? = null
+        var catchupTemplate: String? = null
+        var catchupDays = 1
+        var catchupOffset = 0
         val categories = ArrayList<String>()
         val streams = ArrayList<StreamRef>()
         r.beginObject()
@@ -442,6 +450,9 @@ class PlaylistRepository(
                 "epgChannelId" -> epgChannelId = if (r.peek() == JsonToken.NULL) { r.nextNull(); null } else r.nextString()
                 "kind" -> kind = runCatching { ContentKind.valueOf(r.nextString()) }.getOrDefault(ContentKind.LIVE)
                 "seriesId" -> seriesId = if (r.peek() == JsonToken.NULL) { r.nextNull(); null } else r.nextString()
+                "catchupTemplate" -> catchupTemplate = r.nextString()
+                "catchupDays" -> catchupDays = r.nextInt()
+                "catchupOffset" -> catchupOffset = r.nextInt()
                 "categories" -> {
                     r.beginArray()
                     while (r.hasNext()) categories.add(r.nextString())
@@ -488,6 +499,7 @@ class PlaylistRepository(
             kind = kind,
             categories = categories,
             seriesId = seriesId,
+            catchup = catchupTemplate?.let { io.tapper.core.model.Catchup(it, catchupDays, catchupOffset) },
         )
     }.getOrNull()
 

@@ -229,6 +229,10 @@ fun BrowseScreen(
     onSetReminder: (Channel, Programme) -> Unit,
     onCancelReminder: (Channel, Programme) -> Unit,
     onRecord: (Channel, Programme) -> Unit,
+    /** Catch-up: whether a guide entry can be played from the provider's
+     *  archive, and playing it. Only channels with an archive say yes. */
+    canCatchUp: (Channel, Programme) -> Boolean = { _, _ -> false },
+    onCatchUp: (Channel, Programme) -> Unit = { _, _ -> },
     /** Ad-hoc "record now" for a channel with no specific guide entry chosen. */
     onRecordChannel: (Channel) -> Unit,
     onOpenRecordings: () -> Unit,
@@ -1574,6 +1578,8 @@ fun BrowseScreen(
                     onSetReminder = { p -> focusedChannel?.let { onSetReminder(it, p) } },
                     onCancelReminder = { p -> focusedChannel?.let { onCancelReminder(it, p) } },
                     onRecord = { p -> focusedChannel?.let { onRecord(it, p) } },
+                    canCatchUp = { p -> focusedChannel?.let { canCatchUp(it, p) } ?: false },
+                    onCatchUp = { p -> focusedChannel?.let { onCatchUp(it, p) } },
                     modifier = guideModifier,
                 )
             } else {

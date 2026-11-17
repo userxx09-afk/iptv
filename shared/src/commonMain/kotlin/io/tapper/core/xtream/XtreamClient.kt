@@ -188,10 +188,32 @@ class XtreamClient(
                     streams = listOf(StreamRef(liveUrl(id, ext), 0)),
                     kind = ContentKind.LIVE,
                     categories = listOfNotNull(parsed.category),
+                    catchup = if (o.str("tv_archive")?.trim() == "1")
+                        io.tapper.core.catchup.CatchupUrl.xtream(
+                            base, enc(username), enc(password), id,
+                            o.int("tv_archive_duration") ?: 1, 0,
+                        ) else null,
                 )
             )
         }
-        return out
+        return withServerClock(out)
+    }
+
+    /** Xtream reads a timeshift start in the panel's local time, so channels
+     *  with an archive need the panel's clock offset. One small extra call,
+     *  and only when some channel has an archive. */
+    private suspend fun withServerClock(channels: List<Channel>): List<Channel> {
+        if (channels.none { it.catchup != null }) return channels
+        val offset = try {
+            val info = parseObject(fetch(api(null)))["server_info"] as? JsonObject
+            io.tapper.core.catchup.CatchupUrl.serverOffsetMinutes(info?.str("time_now"), info?.long("timestamp_now"))
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            0
+        }
+        if (offset == 0) return channels
+        return channels.map { c -> c.catchup?.let { c.copy(catchup = it.copy(offsetMinutes = offset)) } ?: c }
     }
 
     /**

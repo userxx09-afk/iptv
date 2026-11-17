@@ -110,6 +110,44 @@ final class TapperPlayer: ObservableObject {
         return true
     }
 
+    /// Whether captions are on - mirrors the setting so the overlay button
+    /// redraws when it changes.
+    @Published private(set) var captionsOn = PlayerSettingsStore.shared.captions
+
+    func toggleCaptions() {
+        PlayerSettingsStore.shared.captions.toggle()
+        captionsOn = PlayerSettingsStore.shared.captions
+        if let item = player?.currentItem { applyTrackPrefs(to: item) }
+    }
+
+    /// Picks the audio track in the preferred language, and turns captions
+    /// on (in that language when there is a choice) or off. Live channels'
+    /// CEA-608 captions arrive as an HLS CLOSED-CAPTIONS rendition, which
+    /// shows up here as a legible option.
+    private func applyTrackPrefs(to item: AVPlayerItem) {
+        let settings = PlayerSettingsStore.shared
+        let language = settings.preferredLanguage
+        let wantCaptions = settings.captions
+        Task { @MainActor in
+            if !language.isEmpty,
+               let audible = try? await item.asset.loadMediaSelectionGroup(for: .audible) {
+                let sorted = AVMediaSelectionGroup.mediaSelectionOptions(
+                    from: audible.options, filteredAndSortedAccordingToPreferredLanguages: [language])
+                if let match = sorted.first { item.select(match, in: audible) }
+            }
+            if let legible = try? await item.asset.loadMediaSelectionGroup(for: .legible) {
+                if wantCaptions {
+                    let languages = language.isEmpty ? Locale.preferredLanguages : [language]
+                    let sorted = AVMediaSelectionGroup.mediaSelectionOptions(
+                        from: legible.options, filteredAndSortedAccordingToPreferredLanguages: languages)
+                    item.select(sorted.first ?? legible.options.first, in: legible)
+                } else if legible.allowsEmptySelection {
+                    item.select(nil, in: legible)
+                }
+            }
+        }
+    }
+
     func endMute() {
         muteTask?.cancel()
         muteTask = nil
@@ -255,6 +293,7 @@ final class TapperPlayer: ObservableObject {
                     self.isBuffering = false
                     self.renderedFrames = true
                     self.logAudio(for: observedItem)
+                    self.applyTrackPrefs(to: observedItem)
                     // transientRetries is NOT reset here: a stream that
                     // reopens fine and then fails again seconds later would
                     // otherwise retry forever. monitorTick resets it after

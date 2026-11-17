@@ -37,6 +37,12 @@ data class Channel(
     val categories: List<String> = emptyList(),
     /** Set on SERIES entries; used to fetch episodes on demand. */
     val seriesId: String? = null,
+    /**
+     * The provider keeps an archive of this live channel, so programmes that
+     * already aired (or the start of the one airing now) can be played back.
+     * Null for the great majority of channels. See io.tapper.core.catchup.
+     */
+    val catchup: Catchup? = null,
 ) {
     val primaryUrl: String? get() = streams.firstOrNull()?.url
     val isPlayable: Boolean get() = streams.isNotEmpty()
@@ -45,4 +51,23 @@ data class Channel(
 data class M3uResult(
     val channels: List<Channel>,
     val declaredEpgUrls: List<String>,
+)
+
+/**
+ * How to reach a live channel's archive.
+ *
+ * [template] is a URL with placeholders that [io.tapper.core.catchup.CatchupUrl]
+ * fills in for one programme: `{utc}` / `${start}` (start, Unix seconds),
+ * `{utcend}` / `${end}`, `{lutc}` / `${now}` / `${timestamp}` (now),
+ * `{duration}` (seconds; `{duration:60}` divides, so minutes), `{offset:N}`
+ * (seconds since the start, divided by N), and the calendar parts of the start
+ * `{Y} {m} {d} {H} {M} {S}`. The calendar parts are in the archive server's
+ * own clock, [offsetMinutes] ahead of UTC (Xtream panels read the start in
+ * their local time).
+ */
+data class Catchup(
+    val template: String,
+    /** How far back the archive goes. */
+    val days: Int,
+    val offsetMinutes: Int = 0,
 )

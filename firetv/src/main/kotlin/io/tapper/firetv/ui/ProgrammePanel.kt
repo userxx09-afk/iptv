@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -47,6 +48,9 @@ fun ProgrammePanel(
     onSetReminder: (EpgDatabase.Programme) -> Unit,
     onCancelReminder: (EpgDatabase.Programme) -> Unit,
     onRecord: (EpgDatabase.Programme) -> Unit,
+    /** Catch-up: true when this entry can be played from the archive. */
+    canCatchUp: (EpgDatabase.Programme) -> Boolean = { false },
+    onCatchUp: (EpgDatabase.Programme) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val fmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
@@ -104,6 +108,13 @@ fun ProgrammePanel(
         }
 
         val now = System.currentTimeMillis()
+        // On a channel with catch-up the schedule also holds what already
+        // aired, so open it at what is on now rather than at yesterday.
+        val listState = rememberLazyListState()
+        val liveIndex = schedule.indexOfFirst { now in it.startUtc until it.endUtc }
+        LaunchedEffect(ch.id, schedule.size) {
+            if (liveIndex > 0) listState.scrollToItem(liveIndex)
+        }
         // The first entry is what is on air; the rest is what follows.
         //
         // Keyed on start time plus position, not start time alone: the crash
@@ -113,18 +124,28 @@ fun ProgrammePanel(
         // channel at the same start time. The database now rejects that kind
         // of duplicate at the source (see EpgDatabase), but the index suffix
         // here means a stray duplicate can never crash this list either way.
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             itemsIndexed(schedule, key = { i, p -> "${p.startUtc}#$i" }) { _, p ->
                 val live = now in p.startUtc until p.endUtc
+                val past = p.endUtc <= now
+                val archived = (live || past) && canCatchUp(p)
                 ScheduleRow(
-                    programme = p, live = live, expanded = expanded, fmt = fmt,
+                    programme = p, live = live, past = past, archived = archived,
+                    expanded = expanded, fmt = fmt,
                     onClick = {
                         menu = {
                             ItemMenu(
                                 title = p.title,
                                 subtitle = ch.name + "  ·  " + fmt.format(Date(p.startUtc)),
                                 actions = buildList {
-                                    if (live) {
+                                    if (archived) {
+                                        add(MenuAction(if (live) "Watch from the start" else "Watch (catch-up)") {
+                                            onCatchUp(p); menu = null
+                                        })
+                                    }
+                                    if (past) {
+                                        // Already over: only catch-up applies.
+                                    } else if (live) {
                                         // Already airing: nothing to remind
                                         // about, but recording from this
                                         // moment to the end still makes sense.
@@ -160,6 +181,8 @@ fun ProgrammePanel(
 private fun ScheduleRow(
     programme: EpgDatabase.Programme,
     live: Boolean,
+    past: Boolean = false,
+    archived: Boolean = false,
     expanded: Boolean,
     fmt: SimpleDateFormat,
     onClick: () -> Unit,
@@ -185,12 +208,15 @@ private fun ScheduleRow(
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Text(
-            fmt.format(Date(programme.startUtc)) + (if (live) "   ON NOW" else ""),
+            fmt.format(Date(programme.startUtc)) +
+                (if (live) "   ON NOW" else "") +
+                (if (archived) "   ▶ CATCH-UP" else ""),
             style = MaterialTheme.typography.bodyMedium,
-            color = if (live) Focus else Dim,
+            color = if (live || archived) Focus else Dim,
         )
         Text(
-            programme.title, style = MaterialTheme.typography.bodyLarge, color = Ink,
+            programme.title, style = MaterialTheme.typography.bodyLarge,
+            color = if (past && !archived) Dim else Ink,
             maxLines = if (expanded) Int.MAX_VALUE else 1,
             overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
         )
