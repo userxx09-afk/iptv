@@ -82,6 +82,26 @@ private val GarysRed = Color(0xFFFF3355)       // --red2
 val GarysYellow = Color(0xFFF5C518)            // --yellow (guide day label, favourites)
 val GarysSub = Color(0xFFCFE0FF)               // .info .sub: what's on, under a title
 
+/** GarysTV guide-grid colors (styles.css: --cell, --cell-alt, --panel2, --focus-text...). */
+object GarysColors {
+    val Panel = Color(0xFF0E1A2E)
+    val Panel2 = Color(0xFF13233D)
+    val Cell = Color(0xFF12213A)
+    val CellAlt = Color(0xFF0F1C32)
+    val Line = Color(0xFF22385C)
+    val Gap = Color(0xFF04070D)
+    val Text = Color(0xFFEEF3FB)
+    val Muted = Color(0xFF93A6C4)
+    val DimText = Color(0xFF5D7194)
+    val Sub = Color(0xFFCFE0FF)
+    val Desc = Color(0xFFC4D1E6)
+    val FocusBg = Color(0xFFE9F0FB)
+    val FocusText = Color(0xFF08111F)
+    val FocusSub = Color(0xFF3B4A63)
+    val Red = Color(0xFFFF3355)
+    val Yellow = Color(0xFFF5C518)
+}
+
 // Getters rather than constants: reading UiSkin.current while composing is
 // what makes a skin change recompose every screen that uses these.
 val Ink: Color get() = if (isGarysSkin) GarysText else TapperInk

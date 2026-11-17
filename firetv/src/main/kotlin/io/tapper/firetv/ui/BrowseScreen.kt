@@ -323,6 +323,8 @@ fun BrowseScreen(
     var schedule by remember { mutableStateOf<List<Programme>>(emptyList()) }
     var menu by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
     var revision by remember { mutableIntStateOf(0) }
+    // Gary's TV skin: the full-screen grid guide (GridGuide) is open.
+    var gridOpen by remember { mutableStateOf(false) }
 
     val kinds = catalogue.availableKinds
     var kind by remember(catalogue.sourceId) { mutableStateOf(kinds.firstOrNull() ?: ContentKind.LIVE) }
@@ -766,6 +768,10 @@ fun BrowseScreen(
     // the D-pad would have nothing focused and appear dead.
     LaunchedEffect(depth) {
         if (depth == Depth.NAV) requestFocusRetrying(firstNavFocus)
+    }
+    // Closing the grid guide puts focus back on the menu it was opened from.
+    LaunchedEffect(gridOpen) {
+        if (!gridOpen && depth == Depth.NAV) requestFocusRetrying(firstNavFocus)
     }
 
     // One per column that can be stepped *back* into (see pendingFocus
@@ -1309,6 +1315,58 @@ fun BrowseScreen(
         }
     }
 
+    if (gridOpen && isGarysSkin) {
+        // Every live channel, or the live category being browsed when there is one.
+        val liveAll = catalogue.section(ContentKind.LIVE)?.items.orEmpty()
+        val browsingLive = kind == ContentKind.LIVE && !myListActive && categoryFilter != null && shown.isNotEmpty()
+        val gridChannels = if (browsingLive) shown else liveAll
+        GridGuide(
+            channels = gridChannels,
+            title = if (browsingLive) "Live TV  ·  $categoryFilter" else "Live TV",
+            scheduleFor = scheduleFor,
+            isFavorite = { favorites.isFavorite(it.sourceId, it.id) },
+            onPlay = onPlay,
+            initialChannelId = focusedChannel?.id,
+            onOptions = { ch, p ->
+                val now = System.currentTimeMillis()
+                menu = {
+                    ItemMenu(
+                        title = p?.title ?: ch.name,
+                        subtitle = ch.name + (p?.let { "  ·  " + clockFormat(it.startUtc) } ?: ""),
+                        actions = buildList {
+                            if (ch.isPlayable) add(MenuAction("Watch ${ch.name}") {
+                                val list = gridChannels.filter { it.isPlayable }
+                                onPlay(list, list.indexOf(ch).coerceAtLeast(0))
+                            })
+                            if (p != null && p.startUtc > now) {
+                                if (hasReminder(ch, p)) add(MenuAction("Cancel reminder") { onCancelReminder(ch, p) })
+                                else add(MenuAction("Remind me") { onSetReminder(ch, p) })
+                                add(MenuAction("Record this") { onRecord(ch, p) })
+                            } else if (p != null) {
+                                add(MenuAction("Record now (until it ends)") { onRecord(ch, p) })
+                            } else {
+                                add(MenuAction("Record now") { onRecordChannel(ch) })
+                            }
+                            if (p != null && onToggleSeries != null) {
+                                add(MenuAction(
+                                    if (isSeriesRecorded(ch, p)) "Stop recording every episode" else "Record every episode"
+                                ) { onToggleSeries(ch, p) })
+                            }
+                            val fav = favorites.isFavorite(ch.sourceId, ch.id)
+                            add(MenuAction(if (fav) "Remove from My List" else "Add to My List") {
+                                favorites.toggle(ch.sourceId, ch.id); revision++
+                            })
+                        },
+                        onDismiss = { menu = null },
+                    )
+                }
+            },
+            onExit = { gridOpen = false },
+        )
+        menu?.invoke()
+        return
+    }
+
     Row(
         Modifier.fillMaxSize().skinBackground()
             .padding(horizontal = 48.dp, vertical = 27.dp)
@@ -1343,6 +1401,14 @@ fun BrowseScreen(
                             // Settings below - see NavPreview.
                             onFocused = { navPreview = NavPreview.NONE },
                             onClick = onSearch, onLongPress = {},
+                        )
+                    }
+                    if (isGarysSkin) item {
+                        // Gary's TV skin: the satellite-style grid guide.
+                        RailRow(
+                            title = "Guide", subtitle = "", selected = false,
+                            onFocused = { navPreview = NavPreview.NONE },
+                            onClick = { gridOpen = true }, onLongPress = {},
                         )
                     }
                     items(kinds, key = { it.name }) { k ->
@@ -1631,6 +1697,10 @@ fun BrowseScreen(
 
     menu?.invoke()
 }
+
+/** A start time in the device's 12/24-hour setting, with "Tomorrow " etc. when not today. */
+internal fun clockFormat(utcMs: Long): String =
+    dayPrefix(utcMs) + java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(utcMs))
 
 /** "Tue 17 Nov  14:05", in the device's locale and 12/24-hour setting. */
 internal fun clockText(): String {

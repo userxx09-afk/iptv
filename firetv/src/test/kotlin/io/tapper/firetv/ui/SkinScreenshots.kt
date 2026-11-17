@@ -58,6 +58,17 @@ class SkinScreenshots {
     @Test fun tapperBrowse() = shot(Skin.TAPPER, "browse-tapper")
     @Test fun garysBrowse() = shot(Skin.GARYSTV, "browse-garystv")
 
+    @Test fun garysGrid() {
+        UiSkin.choose(RuntimeEnvironment.getApplication(), Skin.GARYSTV)
+        InstrumentationRegistry.getInstrumentation().setInTouchMode(false)
+        compose.setContent { TapperTheme { SampleGrid() } }
+        compose.waitForIdle()
+        compose.onRoot().captureRoboImage(
+            "build/skin-shots/grid-garystv.png",
+            roborazziOptions = RoborazziOptions(taskType = RoborazziTaskType.Record),
+        )
+    }
+
     private fun shot(skin: Skin, name: String) {
         UiSkin.choose(RuntimeEnvironment.getApplication(), skin)
         // D-pad mode, as on a Fire TV, so the first channel row can take focus.
@@ -142,4 +153,37 @@ private fun SampleBrowse() {
             modifier = Modifier.weight(1f).fillMaxHeight(),
         )
     }
+}
+
+private val gridTitles = listOf(
+    listOf("CBS Evening News" to 30, "Entertainment Tonight" to 30, "FBI" to 60, "Tracker" to 60),
+    listOf("NBC Nightly News" to 30, "Access Hollywood" to 30, "Chicago Fire" to 60, "Law & Order" to 60),
+    listOf("The Simpsons" to 30, "Bob's Burgers" to 30, "NFL Thursday Night Football" to 180),
+    listOf("Jeopardy!" to 30, "Wheel of Fortune" to 30, "Abbott Elementary" to 30, "Shifting Gears" to 30, "20/20" to 60),
+    listOf("Seinfeld" to 60, "Family Feud" to 30, "Family Feud" to 30, "PIX11 News at 10" to 60),
+    listOf("PBS NewsHour" to 60, "Antiques Roadshow" to 60, "Frontline" to 60),
+)
+
+@Composable
+private fun SampleGrid() {
+    val now = System.currentTimeMillis()
+    val slot = now - now % 1_800_000L - 15 * 60_000L
+    val schedules = channels.mapIndexed { i, c ->
+        var t = slot
+        c.id to gridTitles[i].map { (title, mins) ->
+            val p = EpgDatabase.Programme(c.id, t, t + mins * 60_000L, title,
+                if (i == 0 && t == slot) "Norah O'Donnell with the day's top stories from across the country." else null)
+            t += mins * 60_000L
+            p
+        }
+    }.toMap()
+    GridGuide(
+        channels = channels,
+        title = "Live TV  ·  News",
+        scheduleFor = { schedules[it.id].orEmpty() },
+        isFavorite = { it.id == "c4" },
+        onPlay = { _, _ -> },
+        onOptions = { _, _ -> },
+        onExit = {},
+    )
 }
