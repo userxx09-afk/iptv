@@ -34,6 +34,14 @@ jobs:
       - name: Render skin screenshots
         run: gradle :firetv:testDebugUnitTest --tests 'io.tapper.firetv.ui.SkinScreenshots' --no-daemon --stacktrace
 
+      # Also in the log as base64, for readers that can't fetch artifacts.
+      - name: Print screenshots
+        if: always()
+        run: |
+          for f in firetv/build/skin-shots/*.png; do
+            echo "=== BEGIN $(basename "$f")"; base64 -w 0 "$f"; echo; echo "=== END"
+          done
+
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
