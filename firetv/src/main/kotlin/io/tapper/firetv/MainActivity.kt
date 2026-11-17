@@ -104,6 +104,8 @@ class MainActivity : ComponentActivity() {
         val channels: List<Channel>,
         val index: Int,
         val allLiveChannels: List<Channel> = emptyList(),
+        /** A virtual channel: films one after another. */
+        val autoAdvance: Boolean = false,
     )
 
     // Counts returns to the foreground (not the first start), so the screen
@@ -300,6 +302,8 @@ class MainActivity : ComponentActivity() {
             var watchRevision by remember { mutableIntStateOf(0) }
             var bufferSize by remember { mutableStateOf(app.playerSettings.bufferSize) }
             var captionsOn by remember { mutableStateOf(app.playerSettings.captions) }
+            // Accessibility: every screen's text 25% larger.
+            var largeText by remember { mutableStateOf(app.playerSettings.largeText) }
             // Channels picked for multiview (Browse > long-press > Add to multiview).
             var multiview by remember { mutableStateOf<List<Channel>>(emptyList()) }
             var preferredLanguage by remember { mutableStateOf(app.playerSettings.preferredLanguage) }
@@ -310,6 +314,7 @@ class MainActivity : ComponentActivity() {
             var episodesError by remember { mutableStateOf<String?>(null) }
             // Remembered so episode progress is filed against its series.
             var seriesContext by remember { mutableStateOf<Channel?>(null) }
+            val traktSent = remember { mutableSetOf<String>() }
             var syncBusy by remember { mutableStateOf(false) }
             var lastChannelId by remember { mutableStateOf(app.sourceStore.lastChannelId) }
             var resumeLast by remember { mutableStateOf(app.sourceStore.resumeLastChannel) }
@@ -836,7 +841,20 @@ class MainActivity : ComponentActivity() {
             fun categoryActions(kind: ContentKind, category: String): List<MenuAction> {
                 val hidden = category in app.channelEdits.hiddenCategories()
                 val locked = category in app.parental.lockedCategories()
-                return listOf(
+                // A virtual channel: the category's films back to back, shuffled.
+                val virtual = if (kind == ContentKind.MOVIE) listOf(
+                    MenuAction("Play as a channel (shuffled)") {
+                        val films = catalogue?.section(ContentKind.MOVIE)?.byCategory
+                            ?.firstOrNull { it.label == category || it.key == category }?.channels
+                            ?.filter { it.isPlayable }.orEmpty()
+                        if (films.size < 2) {
+                            Toast.makeText(this@MainActivity, "Not enough films in $category", Toast.LENGTH_SHORT).show()
+                        } else {
+                            startPlayback(Playing(films.shuffled(), 0, autoAdvance = true))
+                        }
+                    },
+                ) else emptyList()
+                return virtual + listOf(
                     MenuAction(if (hidden) "Unhide category" else "Hide category") {
                         withPin("Enter the PIN to edit categories") {
                             app.channelEdits.setCategoryHidden(category, !hidden); editRevision++
@@ -940,7 +958,7 @@ class MainActivity : ComponentActivity() {
             }
 
 
-            TapperTheme {
+            io.tapper.firetv.ui.TextSize(largeText) { TapperTheme {
                 val p = playing
                 val current = screen
 
@@ -1260,6 +1278,8 @@ class MainActivity : ComponentActivity() {
                         },
                         captions = captionsOn,
                         onSetCaptions = { captionsOn = it; app.playerSettings.captions = it },
+                        largeText = largeText,
+                        onSetLargeText = { largeText = it; app.playerSettings.largeText = it },
                         preferredLanguage = preferredLanguage,
                         onSetPreferredLanguage = {
                             preferredLanguage = it; app.playerSettings.preferredLanguage = it
@@ -1301,6 +1321,7 @@ class MainActivity : ComponentActivity() {
                         onClearMovieInfoCache = { app.movieMetadata.clearCache() },
                         household = {
                             io.tapper.firetv.ui.RecordingSettings(app.playerSettings, app.seriesRules)
+                            io.tapper.firetv.ui.TraktSettings(app.trakt, app.openSubtitles)
                             io.tapper.firetv.ui.HouseholdSettings(
                                 profiles = app.profiles,
                                 edits = app.channelEdits,
@@ -1494,8 +1515,13 @@ class MainActivity : ComponentActivity() {
                         },
                         categoryActions = ::categoryActions,
                         onAddToMultiview = { ch ->
-                            val max = io.tapper.firetv.ui.multiviewTiles(this@MainActivity)
+                            // The provider's stream limit caps it too: past it,
+                            // the extra tiles would just fail to open.
+                            val limit = app.repository.maxConnections[ch.sourceId]?.takeIf { it > 0 }
+                            val max = minOf(io.tapper.firetv.ui.multiviewTiles(this@MainActivity), limit ?: Int.MAX_VALUE)
                             when {
+                                limit != null && multiview.size >= limit ->
+                                    Toast.makeText(this@MainActivity, "Your plan allows $limit stream${if (limit == 1) "" else "s"} at once", Toast.LENGTH_LONG).show()
                                 multiview.any { it.id == ch.id && it.sourceId == ch.sourceId } ->
                                     Toast.makeText(this@MainActivity, "${ch.name} is already in multiview", Toast.LENGTH_SHORT).show()
                                 multiview.size >= max ->
@@ -1649,8 +1675,21 @@ class MainActivity : ComponentActivity() {
                                 finished = finished,
                             )
                             watchRevision++
+                            // Trakt history, once per title per session.
+                            if (finished && app.trakt.signedIn && traktSent.add(ch.sourceId + "|" + ch.id)) {
+                                val isEp = ch.id.startsWith("ep-")
+                                lifecycleScope.launch {
+                                    app.trakt.markWatched(
+                                        ch,
+                                        seriesName = if (isEp) seriesContext?.name else null,
+                                        season = if (isEp) ch.group?.filter { c -> c.isDigit() }?.toIntOrNull() ?: 0 else 0,
+                                        episode = if (isEp) ch.number ?: 0 else 0,
+                                    ).onFailure { t -> app.logEvent("TRAKT", "${ch.name}: ${t.message}") }
+                                }
+                            }
                         },
                         onExit = { stopPlayback() },
+                        autoAdvance = p.autoAdvance,
                         bufferSize = bufferSize,
                     )
                     }
@@ -1712,7 +1751,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 }
-            }
+            } }
         }
     }
 }

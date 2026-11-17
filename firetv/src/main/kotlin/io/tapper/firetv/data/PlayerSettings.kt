@@ -83,6 +83,11 @@ class PlayerSettingsStore(context: Context) {
         get() = prefs.getString("language", "") ?: ""
         set(v) = prefs.edit().putString("language", v.trim().lowercase()).apply()
 
+    /** Larger text on every screen, for reading from across the room. */
+    var largeText: Boolean
+        get() = prefs.getBoolean("large_text", false)
+        set(v) = prefs.edit().putBoolean("large_text", v).apply()
+
     /** Minutes a scheduled recording starts early and runs late, since
      *  guides drift and games run over. Set from Settings > Recordings. */
     var recordPadBefore: Int

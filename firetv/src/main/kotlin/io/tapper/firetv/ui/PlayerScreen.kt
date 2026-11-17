@@ -43,6 +43,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Full-screen playback with up/down channel changing.
@@ -81,6 +82,8 @@ fun PlayerScreen(
     onMinimize: (() -> Unit)? = null,
     // Select on the corner picture: back to full screen.
     onExpand: (() -> Unit)? = null,
+    /** Virtual channel: an on-demand list that moves to the next title when one ends. */
+    autoAdvance: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
@@ -189,12 +192,60 @@ fun PlayerScreen(
 
     fun toggleCaptions() {
         val on = player.toggleCaptions()
+        val app = context.applicationContext as? io.tapper.firetv.TapperApp
+        val subs = app?.openSubtitles
+        // A film or episode with no subtitles of its own: fetch some.
+        if (on && !player.hasCaptionTrack() && channel.kind != ContentKind.LIVE && subs?.configured == true) {
+            val lang = app?.playerSettings?.preferredLanguage.orEmpty()
+            android.widget.Toast.makeText(context, "Looking for subtitles...", android.widget.Toast.LENGTH_SHORT).show()
+            val ch = channel
+            scope.launch {
+                subs.find(ch, lang).fold(
+                    onSuccess = { f -> player.addSubtitle(f, lang.ifBlank { "en" }) },
+                    onFailure = { t -> android.widget.Toast.makeText(context, t.message ?: "No subtitles found", android.widget.Toast.LENGTH_LONG).show() },
+                )
+            }
+            return
+        }
         val note = when {
             !on -> "Captions off"
             player.hasCaptionTrack() -> "Captions on"
             else -> "Captions on (this stream doesn't carry any)"
         }
         android.widget.Toast.makeText(context, note, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    // Number entry: digits typed on a remote or keyboard that has them tune
+    // to that channel number after a short pause.
+    var digits by remember { mutableStateOf("") }
+    LaunchedEffect(digits) {
+        if (digits.isEmpty()) return@LaunchedEffect
+        delay(1500)
+        val n = digits.toIntOrNull()
+        digits = ""
+        if (n == null) return@LaunchedEffect
+        val inList = channels.indexOfFirst { it.number == n }
+        if (inList >= 0) {
+            foreignChannel = null
+            index = inList
+        } else {
+            val other = allLiveChannels.firstOrNull { it.number == n }
+            if (other != null) foreignChannel = other
+            else android.widget.Toast.makeText(context, "No channel $n", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Virtual channel: next title when this one finishes.
+    LaunchedEffect(channel.id, autoAdvance) {
+        if (!autoAdvance || channels.size < 2) return@LaunchedEffect
+        while (true) {
+            delay(2000)
+            if (player.hasEnded()) {
+                foreignChannel = null
+                index = (index + 1) % channels.size
+                break
+            }
+        }
     }
 
     fun toggleMute() {
@@ -513,9 +564,19 @@ fun PlayerScreen(
                             android.widget.Toast.makeText(context, "Jumped to live", android.widget.Toast.LENGTH_SHORT).show()
                             true
                         } else false
-                    else -> if (e.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_CAPTIONS) {
-                        toggleCaptions(); true
-                    } else false
+                    else -> {
+                        val code = e.nativeKeyEvent.keyCode
+                        val digit = when (code) {
+                            in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 -> code - android.view.KeyEvent.KEYCODE_0
+                            in android.view.KeyEvent.KEYCODE_NUMPAD_0..android.view.KeyEvent.KEYCODE_NUMPAD_9 -> code - android.view.KeyEvent.KEYCODE_NUMPAD_0
+                            else -> -1
+                        }
+                        when {
+                            code == android.view.KeyEvent.KEYCODE_CAPTIONS -> { toggleCaptions(); true }
+                            digit >= 0 && channel.kind == ContentKind.LIVE -> { digits = (digits + digit).takeLast(5); true }
+                            else -> false
+                        }
+                    }
                 }
             }
     ) {
@@ -605,6 +666,16 @@ fun PlayerScreen(
                 position = if (foreignChannel != null) "" else "${index + 1} / ${channels.size}",
                 programme = nowPlaying(channel),
                 modifier = Modifier.align(Alignment.BottomStart).padding(48.dp),
+            )
+        }
+
+        if (digits.isNotEmpty() && !minimized) {
+            Text(
+                digits,
+                style = MaterialTheme.typography.displaySmall, color = Ink,
+                modifier = Modifier.align(Alignment.TopEnd).padding(48.dp)
+                    .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
             )
         }
 

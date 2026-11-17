@@ -41,6 +41,10 @@ class PlaylistRepository(
      *  Read on every load, so a change applies to the very next one. */
     @Volatile var cacheMaxAgeHours: Int = 30
 
+    /** Streams each Xtream account may play at once (max_connections), by
+     *  source id, from its last sign-in. Multiview won't open more tiles. */
+    val maxConnections = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     private val CACHE_MAX_AGE_MS: Long get() = cacheMaxAgeHours * 60L * 60L * 1000L
 
     /** One entry in a browse rail. */
@@ -212,6 +216,7 @@ class PlaylistRepository(
             throw t
         }
         if (!account.isActive) error("Provider reports this account as ${account.status}.")
+        maxConnections[source.id] = account.maxConnections
         val live = try {
             client.liveChannels(source.id, onWarning = { onWarning("${source.name}: $it") })
         } catch (t: Throwable) {
