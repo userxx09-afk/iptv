@@ -450,7 +450,14 @@ class TapperPlayer(
             .setLoadControl(loadControl)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(context)
-                    .setDataSourceFactory(http)
+                    // smb:// recordings on a network share, file:// ones on
+                    // this Fire TV, and http(s) streams with the settings above.
+                    .setDataSourceFactory(
+                        RoutingDataSourceFactory(
+                            context, http,
+                            io.tapper.firetv.data.RecordingLocationStore(context.applicationContext),
+                        )
+                    )
                     // More patience for a segment/manifest request that fails
                     // transiently before it is treated as a hard error.
                     .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(6))

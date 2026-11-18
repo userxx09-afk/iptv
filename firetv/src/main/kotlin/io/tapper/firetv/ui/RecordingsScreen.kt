@@ -51,9 +51,23 @@ fun RecordingsScreen(
     onCancel: (Recording) -> Unit,
     onDelete: (Recording) -> Unit,
     onExit: () -> Unit,
+    /** Where new recordings go: a network share's name or "this Fire TV".
+     *  Re-read whenever the record menu closes. */
+    savedTo: () -> String = { "" },
+    /** The record menu's contents (RecordingSettings); null hides the button. */
+    settingsPanel: (@Composable () -> Unit)? = null,
 ) {
+    var showSettings by remember { mutableStateOf(false) }
+    val savedText = remember(showSettings) { savedTo() }
+    if (showSettings && settingsPanel != null) {
+        RecordingSettingsDialog(settingsPanel, onDismiss = { showSettings = false })
+    }
     if (io.tapper.firetv.ui.theme.isGarysSkin) {
-        GarysRecordingsScreen(recordings, onPlay, onStop, onCancel, onDelete, onExit)
+        GarysRecordingsScreen(
+            recordings, onPlay, onStop, onCancel, onDelete, onExit,
+            savedTo = savedText,
+            onSettings = if (settingsPanel != null) ({ showSettings = true }) else null,
+        )
         return
     }
     BackHandler { onExit() }
@@ -73,6 +87,16 @@ fun RecordingsScreen(
                 "HLS may still produce a file that doesn't play back.",
             style = MaterialTheme.typography.bodyMedium, color = Dim,
         )
+        if (settingsPanel != null) {
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Chip("Recording settings", false) { showSettings = true }
+                Spacer(Modifier.width(12.dp))
+                if (savedText.isNotBlank()) {
+                    Text("Saving to " + savedText, style = MaterialTheme.typography.bodyMedium, color = Dim)
+                }
+            }
+        }
         Spacer(Modifier.height(20.dp))
 
         if (sorted.isEmpty()) {

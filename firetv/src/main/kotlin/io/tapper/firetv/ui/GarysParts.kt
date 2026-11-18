@@ -161,6 +161,9 @@ fun GarysRecordingsScreen(
     onCancel: (Recording) -> Unit,
     onDelete: (Recording) -> Unit,
     onExit: () -> Unit,
+    savedTo: String = "",
+    /** Opens the record menu (Recording settings); null hides the button. */
+    onSettings: (() -> Unit)? = null,
 ) {
     BackHandler { onExit() }
     val rem = rememberRem()
@@ -189,6 +192,19 @@ fun GarysRecordingsScreen(
                     Text("ALL RECORDINGS", style = gStyle(1.15f, FontWeight.SemiBold, GMuted, spacing = 0.1f))
                     Spacer(Modifier.weight(1f))
                     Text("${sorted.size} recording${if (sorted.size == 1) "" else "s"}", style = gStyle(0.95f, color = GMuted))
+                }
+                if (onSettings != null) {
+                    Row(
+                        Modifier.padding(bottom = rem.dp(0.8f)),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(rem.dp(0.8f)),
+                    ) {
+                        GBtn("⚙ Recording settings", onClick = onSettings)
+                        if (savedTo.isNotBlank()) {
+                            Text("Saving to " + savedTo, style = gStyle(0.95f, color = GMuted),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                 }
                 if (sorted.isEmpty()) {
                     Text(

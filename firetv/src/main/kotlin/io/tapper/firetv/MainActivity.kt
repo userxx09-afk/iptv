@@ -1388,7 +1388,7 @@ class MainActivity : ComponentActivity() {
                         onSetTmdbApiKey = { k -> app.movieMetadata.apiKey = k; tmdbApiKey = k },
                         onClearMovieInfoCache = { app.movieMetadata.clearCache() },
                         household = {
-                            io.tapper.firetv.ui.RecordingSettings(app.playerSettings, app.seriesRules)
+                            io.tapper.firetv.ui.RecordingSettings(app.playerSettings, app.seriesRules, app.recordingLocation)
                             io.tapper.firetv.ui.TraktSettings(app.trakt, app.openSubtitles)
                             io.tapper.firetv.ui.AlexaSettings(
                                 app.alexa,
@@ -1687,7 +1687,12 @@ class MainActivity : ComponentActivity() {
                                     id = "recording-" + r.id, sourceId = r.sourceId,
                                     name = r.channelName, number = null, logoUrl = null,
                                     group = null, countryCode = null, epgChannelId = null,
-                                    streams = listOf(StreamRef(url = "file://" + path, priority = 0)),
+                                    // smb:// recordings are on a network share and
+                                    // play through SmbDataSource; the rest are files here.
+                                    streams = listOf(StreamRef(
+                                        url = if (path.startsWith("smb://", ignoreCase = true)) path else "file://" + path,
+                                        priority = 0,
+                                    )),
                                     kind = ContentKind.MOVIE,
                                 )
                                 startPlayback(Playing(listOf(synthetic), 0))
@@ -1707,6 +1712,10 @@ class MainActivity : ComponentActivity() {
                         onCancel = { r -> app.recordings.remove(r.id); refreshRecordings() },
                         onDelete = { r -> app.recordings.remove(r.id); refreshRecordings() },
                         onExit = { pop() },
+                        savedTo = { app.recordingLocation.activeShare()?.label ?: "this Fire TV" },
+                        settingsPanel = {
+                            io.tapper.firetv.ui.RecordingSettings(app.playerSettings, app.seriesRules, app.recordingLocation)
+                        },
                     )
                 }
                 }
