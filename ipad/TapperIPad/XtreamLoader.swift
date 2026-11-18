@@ -77,9 +77,18 @@ final class XtreamLoader: ObservableObject {
                     self.isLoading = false
                     self.show(saved)
                     self.refreshAccount(host: host, username: username, password: rawPassword, generation: myGeneration)
+                } else if let saved {
+                    // Older than a day: shown at once anyway, then a new copy
+                    // is downloaded behind it and swapped in, instead of the
+                    // whole library download blocking the screen.
+                    AppLog.shared.log("LOAD", "Showing the saved library (out of date); updating it in the background")
+                    self.isLoading = false
+                    self.show(saved)
+                    self.fetchFromServer(host: host, username: username, password: rawPassword,
+                                         generation: myGeneration, fallback: saved, background: true)
                 } else {
                     self.fetchFromServer(host: host, username: username, password: rawPassword,
-                                         generation: myGeneration, fallback: saved)
+                                         generation: myGeneration, fallback: nil)
                 }
             }
         }
@@ -122,9 +131,11 @@ final class XtreamLoader: ObservableObject {
     }
 
     /// Downloads the whole library. [fallback] is an out-of-date saved copy,
-    /// used if the server can't be reached.
+    /// used if the server can't be reached. [background]: the saved copy is
+    /// already on screen, so a failure just keeps it there.
     private func fetchFromServer(host: String, username: String, password: String,
-                                 generation myGeneration: Int, fallback: CachedCatalogue?) {
+                                 generation myGeneration: Int, fallback: CachedCatalogue?,
+                                 background: Bool = false) {
         let startedAt = Date()
         let log = AppLog.shared
         log.log("LOAD", "Xtream login + catalogue fetch starting (host \(host))")
@@ -159,7 +170,9 @@ final class XtreamLoader: ObservableObject {
                     if let error {
                         // The server can't be reached (or refused): an older
                         // saved copy is better than an empty screen.
-                        if let fallback {
+                        if background {
+                            log.log("LOAD", "Background update failed; keeping the saved library")
+                        } else if let fallback {
                             self.show(fallback)
                             self.warnings.append("Couldn't reach the server, so this is the library saved on this iPad.")
                             log.log("LOAD", "Showing the saved library instead")

@@ -91,6 +91,11 @@ class PlaylistRepository(
          *  a whole series catalogue the provider confirmed exists, with no
          *  way to tell from the app that the load had failed at all. */
         val sectionErrors: Map<ContentKind, String> = emptyMap(),
+        /** Read from a saved copy older than the cache window. Shown straight
+         *  away anyway - yesterday's channel list on screen in a second beats
+         *  a loading screen while the whole account downloads again - and the
+         *  caller then refreshes it in the background with forceRefresh. */
+        val stale: Boolean = false,
     ) {
         /**
          * Kinds that get a tab: either they have content, or (Xtream only)
@@ -167,8 +172,11 @@ class PlaylistRepository(
             System.currentTimeMillis() - cache.lastModified() < CACHE_MAX_AGE_MS
 
         var fromCache = false
-        val text = if (!forceRefresh && fresh) {
-            fromCache = true; cache.readText()
+        var stale = false
+        val text = if (!forceRefresh && cache.exists()) {
+            // A copy past the cache window is still used for this launch;
+            // stale tells the caller to fetch a new one behind it.
+            fromCache = true; stale = !fresh; cache.readText()
         } else {
             try {
                 download(source.location).also { cache.writeText(it) }
@@ -179,7 +187,7 @@ class PlaylistRepository(
             }
         }
         val parsed = M3uParser.parse(text, source.id)
-        return index(source.id, parsed.channels, parsed.declaredEpgUrls, fromCache)
+        return index(source.id, parsed.channels, parsed.declaredEpgUrls, fromCache).copy(stale = stale)
     }
 
     private fun loadXtream(source: TvSource, forceRefresh: Boolean, onUpdate: (String, Catalogue) -> Unit): Catalogue {
@@ -191,6 +199,10 @@ class PlaylistRepository(
         // so "how fresh" isn't a second number to reason about.
         if (!forceRefresh) {
             freshXtreamCache(source.id)?.let { return it }
+            // Past the cache window: still shown at once, and refreshed in
+            // the background by the caller (see Catalogue.stale), instead of
+            // the multi-minute full fetch blocking the screen once a day.
+            parseXtreamCache(source.id)?.let { return it.copy(stale = true) }
         }
 
         val creds = vault.get(source.id)

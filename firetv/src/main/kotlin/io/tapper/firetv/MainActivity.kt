@@ -556,6 +556,10 @@ class MainActivity : ComponentActivity() {
                 loadStatus = null
                 val primary = active
                 val extra = alongside
+                // What's on now comes straight from the guide saved on this
+                // device, so it can be ready while the channel list loads
+                // rather than after it (and after every source alongside).
+                reloadNowPlaying()
                 lifecycleScope.launch {
                     var reachedBrowse = false
                     // The sources shown alongside load at the same time as the
@@ -639,6 +643,46 @@ class MainActivity : ComponentActivity() {
                         // Refresh in the background; the channel list is already
                         // usable and must not wait on a 100MB guide download.
                         refreshEpg(cat, onlyStale = true)
+
+                        // A channel list read from a saved copy past the cache
+                        // window was shown anyway (see Catalogue.stale); fetch
+                        // a new one now, behind the screen, and swap it in.
+                        // The guide is keyed by channel id, so the rows already
+                        // on screen line up with the new list as it is.
+                        val staleExtra = extraCats.filter { it.second.stale }.map { it.first }
+                        if (cat.stale || staleExtra.isNotEmpty()) {
+                            launch {
+                                logEvent("LOAD", "Showing the saved channel list; updating it in the background")
+                                loadStatus = "Updating channels in the background..."
+                                val freshExtra = staleExtra.map { s2 ->
+                                    async {
+                                        s2 to app.repository.load(s2, forceRefresh = true).onFailure {
+                                            logEvent("LOAD", "${s2.name} background update: ${it.message}")
+                                        }.getOrNull()
+                                    }
+                                }.awaitAll()
+                                // Partial (live-only) results are not shown: the
+                                // saved copy on screen is already complete.
+                                val freshPrimary = if (cat.stale) {
+                                    app.repository.load(primary, forceRefresh = true).onFailure {
+                                        logEvent("LOAD", "${primary.name} background update: ${it.message}")
+                                    }.getOrNull()
+                                } else null
+                                // Dropped if the user switched source meanwhile.
+                                if (active.id != primary.id || alongside.map { it.id } != extra.map { it.id }) {
+                                    return@launch
+                                }
+                                loadStatus = null
+                                if (freshPrimary == null && freshExtra.all { it.second == null }) return@launch
+                                freshExtra.forEach { (s2, c) -> c?.let { alongsideDeclared[s2.id] = it.declaredEpgUrls } }
+                                extraCats = extraCats.map { (s2, c) ->
+                                    s2 to (freshExtra.firstOrNull { it.first.id == s2.id }?.second ?: c)
+                                }
+                                freshPrimary?.let { latest = it }
+                                show()
+                                reloadNowPlaying()
+                            }
+                        }
                     }
                 }
             }
