@@ -658,6 +658,13 @@ fun PlayerScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(48.dp).fillMaxWidth(),
             )
         } else if (overlayLevel == 0 && overlayVisible) {
+            // Gary's TV skin: GarysTV's full-width info band along the bottom.
+            if (io.tapper.firetv.ui.theme.isGarysSkin) GarysPlayerOsd(
+                channel = channel,
+                position = if (foreignChannel != null) "" else "${index + 1} / ${channels.size}",
+                programme = nowPlaying(channel),
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            ) else
             ChannelBadge(
                 channel = channel,
                 // `index` only means something inside `channels` - a channel

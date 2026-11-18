@@ -24,6 +24,11 @@ import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.RoborazziTaskType
 import com.github.takahirom.roborazzi.captureRoboImage
 import io.tapper.core.model.Channel
+import io.tapper.core.model.ContentKind
+import io.tapper.firetv.data.FavoritesStore
+import io.tapper.firetv.data.PlaylistRepository
+import io.tapper.firetv.data.Recording
+import io.tapper.firetv.data.RecordingStatus
 import io.tapper.core.model.StreamRef
 import io.tapper.firetv.data.EpgDatabase
 import io.tapper.firetv.data.TvSource
@@ -56,7 +61,21 @@ class SkinScreenshots {
     @get:Rule val compose = createComposeRule()
 
     @Test fun tapperBrowse() = shot(Skin.TAPPER, "browse-tapper")
-    @Test fun garysBrowse() = shot(Skin.GARYSTV, "browse-garystv")
+    @Test fun garysHome() = garys(GView.HOME, "garys-home")
+    @Test fun garysGuide() = garys(GView.GUIDE, "garys-guide")
+    @Test fun garysShows() = garys(GView.SHOWS, "garys-shows")
+
+    private fun garys(view: GView, name: String) {
+        UiSkin.choose(RuntimeEnvironment.getApplication(), Skin.GARYSTV)
+        InstrumentationRegistry.getInstrumentation().setInTouchMode(false)
+        GarysNav.view = view
+        compose.setContent { TapperTheme { SampleGarys() } }
+        compose.waitForIdle()
+        compose.onRoot().captureRoboImage(
+            "build/skin-shots/$name.png",
+            roborazziOptions = RoborazziOptions(taskType = RoborazziTaskType.Record),
+        )
+    }
 
     private fun shot(skin: Skin, name: String) {
         UiSkin.choose(RuntimeEnvironment.getApplication(), skin)
@@ -142,4 +161,67 @@ private fun SampleBrowse() {
             modifier = Modifier.weight(1f).fillMaxHeight(),
         )
     }
+}
+
+private val gridTitles = listOf(
+    listOf("CBS Evening News" to 30, "Entertainment Tonight" to 30, "FBI" to 60, "Tracker" to 60),
+    listOf("NBC Nightly News" to 30, "Access Hollywood" to 30, "Chicago Fire" to 60, "Law & Order" to 60),
+    listOf("The Simpsons" to 30, "Bob's Burgers" to 30, "NFL Thursday Night Football" to 180),
+    listOf("Jeopardy!" to 30, "Wheel of Fortune" to 30, "Abbott Elementary" to 30, "Shifting Gears" to 30, "20/20" to 60),
+    listOf("Seinfeld" to 60, "Family Feud" to 30, "Family Feud" to 30, "PIX11 News at 10" to 60),
+    listOf("PBS NewsHour" to 60, "Antiques Roadshow" to 60, "Frontline" to 60),
+)
+
+private fun show(i: Int, name: String) = Channel(
+    id = "s$i", sourceId = "s1", name = name, number = null, logoUrl = null,
+    group = "Drama", countryCode = null, epgChannelId = null, kind = ContentKind.SERIES,
+)
+
+@Composable
+private fun SampleGarys() {
+    val now = System.currentTimeMillis()
+    val slot = now - now % 1_800_000L - 15 * 60_000L
+    val schedules = channels.mapIndexed { i, c ->
+        var t = slot
+        c.id to gridTitles[i].map { (title, mins) ->
+            val p = EpgDatabase.Programme(c.id, t, t + mins * 60_000L, title,
+                if (i == 0 && t == slot) "Norah O'Donnell with the day's top stories from across the country." else null)
+            t += mins * 60_000L
+            p
+        }
+    }.toMap()
+    val shows = listOf("Yellowstone", "The Bear", "Severance", "Abbott Elementary", "Slow Horses", "Shrinking")
+        .mapIndexed { i, n -> show(i, n) }
+    val live = PlaylistRepository.Group(null, "News", channels)
+    val catalogue = PlaylistRepository.Catalogue(
+        sourceId = "s1",
+        channels = channels + shows,
+        sections = mapOf(
+            ContentKind.LIVE to PlaylistRepository.Section(ContentKind.LIVE, channels, listOf(live), listOf(live)),
+            ContentKind.SERIES to PlaylistRepository.Section(ContentKind.SERIES, shows,
+                listOf(PlaylistRepository.Group(null, "Drama", shows)), listOf(PlaylistRepository.Group(null, "Drama", shows))),
+        ),
+        declaredEpgUrls = emptyList(),
+        fromCache = false,
+    )
+    val favorites = remember { FavoritesStore(RuntimeEnvironment.getApplication(), "shots_fav") }
+    GarysBrowseScreen(
+        catalogue = catalogue,
+        favorites = favorites,
+        sourceName = "Free TV",
+        nowPlaying = schedules.mapValues { (_, l) -> l.first() }.mapKeys { (k, _) -> k },
+        epgStatus = null,
+        epgIdFor = { it.id },
+        guideFor = { chans, _, _ -> chans.associate { it.id to schedules[it.id].orEmpty() } },
+        epgRevision = 0,
+        lastChannelId = null,
+        recordings = listOf(
+            Recording("r1", "s1", "c2", "WCBS 2 New York", "", now - 3_600_000L, now + 1_800_000L, status = RecordingStatus.RECORDING),
+            Recording("r2", "s1", "c13", "WNET PBS 13", "", now - 86_400_000L, now - 82_800_000L, status = RecordingStatus.DONE),
+        ),
+        onPlay = { _, _ -> }, onOpenSeries = {}, onSearch = {}, onSettings = {}, onOpenRecordings = {},
+        onRecord = { _, _ -> }, onRecordChannel = {},
+        hasReminder = { _, _ -> false }, onSetReminder = { _, _ -> }, onCancelReminder = { _, _ -> },
+        onSelectionChanged = {},
+    )
 }

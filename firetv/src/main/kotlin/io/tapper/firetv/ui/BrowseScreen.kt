@@ -299,7 +299,55 @@ fun BrowseScreen(
      *  puts focus on it, wherever the browse state had wandered to. */
     revealChannel: Channel? = null,
     revealToken: Int = 0,
+    /** Every recording, for the Gary's TV skin's Home strips and its
+     *  "Recording" badge in the top bar. */
+    recordings: List<io.tapper.firetv.data.Recording> = emptyList(),
+    /** Gary's TV guide grid: a channel's shows between two times. Falls back
+     *  to [scheduleFor] (what's on now and next) when not given. */
+    guideWindowFor: ((Channel, Long, Long) -> List<Programme>)? = null,
 ) {
+    // Gary's TV skin: GarysTV's own main screens (Home tiles, the DISH-style
+    // guide grid, Movies/Shows lists) in place of Tapper's columns. Same
+    // data and actions, different interface.
+    if (isGarysSkin) {
+        GarysBrowseScreen(
+            catalogue = catalogue,
+            favorites = favorites,
+            sourceName = activeSource.name,
+            nowPlaying = nowPlaying,
+            epgStatus = epgStatus,
+            epgIdFor = epgIdFor,
+            guideFor = { chans, from, to ->
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val out = HashMap<String, List<Programme>>()
+                    for (ch in chans) {
+                        val id = epgIdFor(ch)
+                        if (id in out) continue
+                        out[id] = runCatching {
+                            guideWindowFor?.invoke(ch, from, to) ?: scheduleFor(ch)
+                        }.getOrDefault(emptyList()).filter { it.endUtc > from && it.startUtc < to }
+                    }
+                    out
+                }
+            },
+            epgRevision = epgRevision,
+            lastChannelId = initialChannelId,
+            recordings = recordings,
+            onPlay = onPlay,
+            onOpenSeries = onOpenSeries,
+            onSearch = onSearch,
+            onSettings = onSettings,
+            onOpenRecordings = onOpenRecordings,
+            onOpenTeams = onOpenTeams,
+            onRecord = onRecord,
+            onRecordChannel = onRecordChannel,
+            hasReminder = hasReminder,
+            onSetReminder = onSetReminder,
+            onCancelReminder = onCancelReminder,
+            onSelectionChanged = { onSelectionChanged(it) },
+        )
+        return
+    }
     /**
      * Depth follows focus rather than clicks wherever there is a natural
      * "next column" to focus into (country -> category -> channel -> guide),
@@ -1631,6 +1679,10 @@ fun BrowseScreen(
 
     menu?.invoke()
 }
+
+/** A start time in the device's 12/24-hour setting, with "Tomorrow " etc. when not today. */
+internal fun clockFormat(utcMs: Long): String =
+    dayPrefix(utcMs) + java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(utcMs))
 
 /** "Tue 17 Nov  14:05", in the device's locale and 12/24-hour setting. */
 internal fun clockText(): String {
