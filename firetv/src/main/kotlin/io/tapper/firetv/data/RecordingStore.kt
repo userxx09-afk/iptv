@@ -87,7 +87,18 @@ class RecordingStore(private val context: Context) {
         val rec = get(id)
         save(all().filterNot { it.id == id })
         cancelAlarms(context, id)
-        rec?.filePath?.let { runCatching { File(it).delete() } }
+        rec?.filePath?.let { path ->
+            if (path.startsWith("smb://", ignoreCase = true)) {
+                // A network delete can take seconds; never on the caller's
+                // (usually the main) thread.
+                val loc = RecordingLocationStore(context)
+                Thread {
+                    runCatching { loc.shareFor(path)?.let { SmbStorage.delete(path, it) } }
+                }.start()
+            } else {
+                runCatching { File(path).delete() }
+            }
+        }
     }
 
     fun schedule(recording: Recording) {

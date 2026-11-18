@@ -106,7 +106,11 @@ android {
     // build is actually installed, short of an adb pull.
     buildFeatures { compose = true; buildConfig = true }
     sourceSets["main"].java.srcDirs("src/main/kotlin")
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    packaging {
+        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Bouncy Castle (pulled in by smbj) ships OSGi manifests per Java version.
+        resources.excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+    }
     // Robolectric screenshot tests (src/test, SkinScreenshots). Only run by
     // the "Fire TV skin screenshots" workflow; the release build ignores them.
     testOptions.unitTests {
@@ -142,6 +146,9 @@ dependencies {
     implementation(libs.work.runtime)
     // Reads a user-picked SAF folder's contents (custom logo folder override).
     implementation(libs.documentfile)
+    // Writes recordings straight to a network share (Settings > Recording >
+    // Network storage) and reads them back for playback. Pure Java SMB 2/3.
+    implementation(libs.smbj)
 
     // Screenshot tests only (see testOptions above); nothing here ships.
     testImplementation("junit:junit:4.13.2")

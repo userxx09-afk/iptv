@@ -11,6 +11,8 @@ coroutines = "1.8.1"
 securityCrypto = "1.1.0-alpha06"
 workManager = "2.9.1"
 documentFile = "1.0.1"
+# SMB client for saving recordings to a NAS / Windows share (Fire TV).
+smbj = "0.13.0"
 # Networking/JSON for shared's commonMain (XtreamClient/TmdbClient) — see the
 # comment in shared/build.gradle.kts for why plain HttpURLConnection/org.json
 # (Android-only) couldn't just travel to commonMain as-is.
@@ -40,6 +42,7 @@ coroutines-core     = { group = "org.jetbrains.kotlinx", name = "kotlinx-corouti
 security-crypto     = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 work-runtime        = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 documentfile        = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentFile" }
+smbj                = { group = "com.hierynomus", name = "smbj", version.ref = "smbj" }
 # ktor-client-core is the commonMain API; okhttp/darwin are the per-platform
 # engines that actually open sockets (OkHttp already ships transitively via
 # Media3 on Fire TV; Darwin wraps NSURLSession on iOS — see net/HttpEngine.kt).

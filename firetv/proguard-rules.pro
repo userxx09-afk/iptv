@@ -40,3 +40,17 @@
 -keepclasseswithmembers class io.tapper.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# smbj (recordings on a network share). Its event bus (mbassador) finds
+# handlers by annotation at runtime, and its packet classes are looked up by
+# reflection, so keep both whole. Kerberos/GSS-API is JVM-only and unused here
+# (we sign in with NTLM user/password or guest).
+-keep class com.hierynomus.** { *; }
+-keep class net.engio.mbassy.** { *; }
+-dontwarn com.hierynomus.**
+-dontwarn net.engio.mbassy.**
+-dontwarn javax.el.**
+-dontwarn org.ietf.jgss.**
+-dontwarn javax.security.auth.kerberos.**
+-dontwarn javax.security.auth.login.**
+-dontwarn javax.security.auth.callback.**

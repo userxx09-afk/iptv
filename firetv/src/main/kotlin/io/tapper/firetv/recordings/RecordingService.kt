@@ -5,7 +5,9 @@ import android.content.Intent
 import android.os.IBinder
 import io.tapper.firetv.TapperApp
 import io.tapper.firetv.data.Notifications
+import io.tapper.firetv.data.RecordingLocationStore
 import io.tapper.firetv.data.RecordingStatus
+import io.tapper.firetv.data.SmbStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -13,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Collections
@@ -64,16 +67,23 @@ class RecordingService : Service() {
         // stall.
         startForeground(id.hashCode(), Notifications.recordingNotification(this, recording.channelName))
 
-        val outFile = File(
-            getExternalFilesDir("recordings") ?: filesDir,
-            sanitizeFileName(recording.channelName) + "-" + recording.startUtc + ".ts",
-        )
+        // Where it goes: the network share picked in Settings > Recording,
+        // or this Fire TV. The share is only tried once the stream answers,
+        // so a dead channel doesn't leave empty files on the NAS.
+        val location = app.recordingLocation
+        val name = sanitizeFileName(recording.channelName) + "-" + recording.startUtc + ".ts"
+        val localFile = File(location.localDir(), name)
+        val share = location.activeShare()
         app.recordings.upsert(
-            recording.copy(status = RecordingStatus.RECORDING, filePath = outFile.absolutePath)
+            recording.copy(
+                status = RecordingStatus.RECORDING,
+                filePath = share?.uriOf(name) ?: localFile.absolutePath,
+            )
         )
 
         jobs[id] = scope.launch {
             var failed = false
+            var written = 0L
             try {
                 val conn = (URL(recording.streamUrl).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 20_000
@@ -85,14 +95,30 @@ class RecordingService : Service() {
                 if (conn.responseCode !in 200..299) {
                     failed = true
                 } else {
-                    outFile.parentFile?.mkdirs()
+                    val output = openOutput(app, id, share, name, localFile, recording.channelName)
                     conn.inputStream.use { input ->
-                        outFile.outputStream().use { output ->
+                        output.use { out ->
                             val buffer = ByteArray(64 * 1024)
                             while (true) {
                                 val n = input.read(buffer)
                                 if (n < 0) break
-                                output.write(buffer, 0, n)
+                                try {
+                                    out.write(buffer, 0, n)
+                                } catch (t: Throwable) {
+                                    // The share went away mid-recording (NAS
+                                    // asleep, Wi-Fi drop). What's already
+                                    // there is a playable file, so keep it
+                                    // as a short recording rather than a
+                                    // failed one.
+                                    app.logEvent(
+                                        "RECORDING",
+                                        "Lost the network share while recording ${recording.channelName}: " +
+                                            SmbStorage.friendly(t),
+                                    )
+                                    if (written == 0L) failed = true
+                                    break
+                                }
+                                written += n
                             }
                         }
                     }
@@ -131,6 +157,26 @@ class RecordingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
+    }
+
+    /** The share's file, or this Fire TV's when the share can't be opened. */
+    private fun openOutput(
+        app: TapperApp, id: String, share: RecordingLocationStore.Share?,
+        name: String, localFile: File, channelName: String,
+    ): OutputStream {
+        if (share != null) {
+            try {
+                return SmbStorage.create(share, name)
+            } catch (t: Throwable) {
+                app.logEvent(
+                    "RECORDING",
+                    "Couldn't save $channelName to ${share.label} (${SmbStorage.friendly(t)}). Saving it on this Fire TV instead.",
+                )
+                app.recordings.get(id)?.let { app.recordings.upsert(it.copy(filePath = localFile.absolutePath)) }
+            }
+        }
+        localFile.parentFile?.mkdirs()
+        return localFile.outputStream()
     }
 
     private fun sanitizeFileName(name: String): String =
