@@ -61,6 +61,9 @@ object UiSkin {
 
 val isGarysSkin: Boolean get() = UiSkin.current == Skin.GARYSTV
 
+/** True for content drawn on GarysTV's white focus highlight, so its text turns dark. */
+val LocalOnLight = androidx.compose.runtime.compositionLocalOf { false }
+
 // Tapper palette (unchanged from before skins existed).
 private val TapperInk = Color(0xFFF2EEE6)
 private val TapperDim = Color(0xFF969EAC)
