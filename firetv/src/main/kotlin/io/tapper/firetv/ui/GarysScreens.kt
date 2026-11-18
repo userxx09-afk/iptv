@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -486,7 +487,12 @@ private fun GHome(
         val tileH = (maxHeight * 0.30f).coerceIn(r.dp(8f), r.dp(17f))
         val logoSize = (maxHeight * 0.12f).coerceIn(r.dp(4.5f), r.dp(7f))
         Column(
-            Modifier.fillMaxSize().padding(bottom = maxHeight * 0.04f),
+            // Scrolls rather than squashing the strips when they don't all fit,
+            // like GarysTV's Home (.home > * { flex: none }).
+            Modifier.fillMaxSize()
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                .heightIn(min = maxHeight)
+                .padding(bottom = maxHeight * 0.04f),
             verticalArrangement = Arrangement.spacedBy(r.dp(2f), Alignment.CenterVertically),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(r.dp(1.6f))) {
