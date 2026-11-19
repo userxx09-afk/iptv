@@ -55,6 +55,8 @@ fun ProgrammePanel(
     /** Catch-up: true when this entry can be played from the archive. */
     canCatchUp: (EpgDatabase.Programme) -> Boolean = { false },
     onCatchUp: (EpgDatabase.Programme) -> Unit = {},
+    /** Saves an aired programme from the archive for offline viewing. */
+    onDownloadCatchUp: (EpgDatabase.Programme) -> Unit = {},
     /** Series recording: whether a title is already recorded every time, and toggling it. */
     isSeriesRecorded: (EpgDatabase.Programme) -> Boolean = { false },
     onToggleSeries: ((EpgDatabase.Programme) -> Unit)? = null,
@@ -149,6 +151,12 @@ fun ProgrammePanel(
                                         add(MenuAction(if (live) "Watch from the start" else "Watch (catch-up)") {
                                             onCatchUp(p); menu = null
                                         })
+                                    }
+                                    if (past && archived) {
+                                        // Finished, so the archive holds all
+                                        // of it: it can be saved to watch
+                                        // later without the internet.
+                                        add(MenuAction("Download") { onDownloadCatchUp(p); menu = null })
                                     }
                                     if (past) {
                                         // Already over: only catch-up applies.

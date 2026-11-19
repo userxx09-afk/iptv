@@ -18,6 +18,9 @@ class RecordingAlarmReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_START = "io.tapper.firetv.recordings.START"
         const val ACTION_STOP = "io.tapper.firetv.recordings.STOP"
+        /** Not an alarm: sent straight to RecordingService to work through
+         *  the download queue (see RecordingService.kickDownloads). */
+        const val ACTION_DOWNLOAD = "io.tapper.firetv.recordings.DOWNLOAD"
     }
 
     override fun onReceive(context: Context, intent: Intent) {

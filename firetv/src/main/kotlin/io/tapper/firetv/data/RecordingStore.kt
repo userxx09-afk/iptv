@@ -23,12 +23,28 @@ data class Recording(
     val endUtc: Long,
     val filePath: String? = null,
     val status: RecordingStatus = RecordingStatus.SCHEDULED,
+    /** A movie, episode or catch-up programme saved for offline viewing,
+     *  rather than a live channel captured for a time window. For these,
+     *  SCHEDULED means "waiting its turn", RECORDING means "downloading" and
+     *  startUtc is when it was asked for. See RecordingService.download. */
+    val download: Boolean = false,
+    val bytesDone: Long = 0,
+    /** -1 while the server hasn't said how big it is. */
+    val bytesTotal: Long = -1,
+    /** Request headers the stream needs (User-Agent, Referer), the same ones
+     *  the player sends. */
+    val headers: Map<String, String> = emptyMap(),
+    /** Why it failed, in plain English, when it did. */
+    val error: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("sourceId", sourceId).put("channelId", channelId)
         .put("channelName", channelName).put("streamUrl", streamUrl)
         .put("startUtc", startUtc).put("endUtc", endUtc)
         .put("filePath", filePath ?: JSONObject.NULL).put("status", status.name)
+        .put("download", download).put("bytesDone", bytesDone).put("bytesTotal", bytesTotal)
+        .put("headers", JSONObject().apply { headers.forEach { (k, v) -> put(k, v) } })
+        .put("error", error ?: JSONObject.NULL)
 
     companion object {
         fun fromJson(o: JSONObject) = Recording(
@@ -39,6 +55,13 @@ data class Recording(
             filePath = o.optString("filePath").takeIf { it.isNotBlank() && it != "null" },
             status = runCatching { RecordingStatus.valueOf(o.optString("status", "SCHEDULED")) }
                 .getOrDefault(RecordingStatus.SCHEDULED),
+            download = o.optBoolean("download", false),
+            bytesDone = o.optLong("bytesDone", 0),
+            bytesTotal = o.optLong("bytesTotal", -1),
+            headers = o.optJSONObject("headers")?.let { h ->
+                h.keys().asSequence().associateWith { k -> h.optString(k) }
+            }.orEmpty(),
+            error = o.optString("error").takeIf { it.isNotBlank() && it != "null" },
         )
 
         fun newId(): String = "rec-" + UUID.randomUUID().toString().take(8)
@@ -113,14 +136,41 @@ class RecordingStore(private val context: Context) {
     fun markOrphanedRecordingsFailed() {
         val stuck = all().filter { it.status == RecordingStatus.RECORDING }
         if (stuck.isEmpty()) return
-        save(all().map { if (it.status == RecordingStatus.RECORDING) it.copy(status = RecordingStatus.FAILED) else it })
+        // A download, unlike a live capture, can simply carry on: it goes
+        // back in the queue and picks up where it stopped (see
+        // RecordingService.download). Live recordings can't get the missed
+        // minutes back, so those are marked failed as before.
+        save(all().map {
+            when {
+                it.status != RecordingStatus.RECORDING -> it
+                it.download -> it.copy(status = RecordingStatus.SCHEDULED)
+                else -> it.copy(status = RecordingStatus.FAILED)
+            }
+        })
+    }
+
+    /** Downloads waiting their turn, oldest first. */
+    fun pendingDownloads(): List<Recording> =
+        all().filter { it.download && it.status == RecordingStatus.SCHEDULED }.sortedBy { it.startUtc }
+
+    /** An earlier download of the same stream that hasn't failed, if any:
+     *  asking twice shouldn't fetch the same film twice. */
+    fun existingDownload(streamUrl: String): Recording? =
+        all().firstOrNull { it.download && it.streamUrl == streamUrl && it.status != RecordingStatus.FAILED }
+
+    /** Progress only, without touching anything else on the row - the UI may
+     *  have deleted the row meanwhile, in which case nothing is written. */
+    fun updateProgress(id: String, done: Long, total: Long) {
+        val list = all()
+        if (list.none { it.id == id }) return
+        save(list.map { if (it.id == id) it.copy(bytesDone = done, bytesTotal = total) else it })
     }
 
     /** Called by BootReceiver. Only SCHEDULED (not yet started) recordings
      *  are re-armed; anything that was RECORDING is handled separately by
      *  [markOrphanedRecordingsFailed]. */
     fun rescheduleAll(now: Long = System.currentTimeMillis()) {
-        all().filter { it.status == RecordingStatus.SCHEDULED && it.endUtc > now }
+        all().filter { !it.download && it.status == RecordingStatus.SCHEDULED && it.endUtc > now }
             .forEach { scheduleAlarms(context, it) }
     }
 

@@ -67,7 +67,7 @@ class SeriesRuleStore(context: Context) {
                          now: Long = System.currentTimeMillis()): Int {
         val rules = all()
         if (rules.isEmpty()) return 0
-        val existing = recordings.all()
+        val existing = recordings.all().filterNot { it.download }
         val before = settings.recordPadBefore * 60_000L
         val after = settings.recordPadAfter * 60_000L
         var added = 0

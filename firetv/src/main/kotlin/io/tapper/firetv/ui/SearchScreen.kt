@@ -160,6 +160,8 @@ fun SearchScreen(
      *  missing or wrong guide id. */
     onSetGuideChannel: (Channel) -> Unit,
     onExit: () -> Unit,
+    /** Download a movie for offline viewing. */
+    onDownload: (Channel) -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     var revision by remember { mutableIntStateOf(0) }
@@ -319,6 +321,9 @@ fun SearchScreen(
                                     subtitle = ch.group,
                                     actions = listOf(
                                         MenuAction("Play") { onPlay(ch) },
+                                    ) + (if (ch.kind == ContentKind.MOVIE) listOf(
+                                        MenuAction("Download") { onDownload(ch) },
+                                    ) else emptyList()) + listOf(
                                         MenuAction(
                                             if (fav) "Remove from My List" else "Add to My List"
                                         ) { onToggleFavorite(ch); revision++ },

@@ -4,7 +4,9 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import io.tapper.firetv.TapperApp
+import android.app.NotificationManager
 import io.tapper.firetv.data.Notifications
+import io.tapper.firetv.data.Recording
 import io.tapper.firetv.data.RecordingLocationStore
 import io.tapper.firetv.data.RecordingStatus
 import io.tapper.firetv.data.SmbStorage
@@ -37,8 +39,8 @@ import java.util.Collections
 class RecordingService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val jobs = HashMap<String, Job>()
-    private val connections = HashMap<String, HttpURLConnection>()
+    private val jobs = Collections.synchronizedMap(HashMap<String, Job>())
+    private val connections = Collections.synchronizedMap(HashMap<String, HttpURLConnection>())
 
     // Ids whose stop was requested by this service, not caused by the
     // network - a read failure for one of these is the intended shutdown
@@ -54,8 +56,95 @@ class RecordingService : Service() {
         when (intent?.action) {
             RecordingAlarmReceiver.ACTION_START -> id?.let { startRecording(app, it) }
             RecordingAlarmReceiver.ACTION_STOP -> id?.let { stopRecording(it) }
+            RecordingAlarmReceiver.ACTION_DOWNLOAD -> {
+                // Started with startForegroundService, so it has to go
+                // foreground straight away even if the queue turns out empty.
+                startForeground(DOWNLOAD_NOTIFICATION, Notifications.downloadNotification(this, "Getting ready", -1))
+                kickDownloads(app)
+            }
         }
         return START_NOT_STICKY
+    }
+
+    // ---------------- downloads ----------------
+
+    /** The one download running now. One at a time: most IPTV plans allow
+     *  one or two connections, and a second download would also take the
+     *  one the TV needs to watch anything while it runs. */
+    private var downloading: String? = null
+
+    @Synchronized
+    private fun kickDownloads(app: TapperApp) {
+        if (downloading != null) return
+        val next = app.recordings.pendingDownloads().firstOrNull()
+        if (next == null) {
+            if (jobs.isEmpty()) {
+                stopSelf()
+            } else {
+                // A live recording is still going: put its notice back as
+                // the foreground one in place of the download's.
+                jobs.keys.firstNotNullOfOrNull { app.recordings.get(it) }?.let {
+                    startForeground(it.id.hashCode(), Notifications.recordingNotification(this, it.channelName))
+                }
+                runCatching { getSystemService(NotificationManager::class.java)?.cancel(DOWNLOAD_NOTIFICATION) }
+            }
+            return
+        }
+        download(app, next)
+    }
+
+    private fun download(app: TapperApp, rec: Recording) {
+        val id = rec.id
+        downloading = id
+        startForeground(DOWNLOAD_NOTIFICATION, Notifications.downloadNotification(this, rec.channelName, -1))
+        app.recordings.upsert(rec.copy(status = RecordingStatus.RECORDING, error = null))
+        val nm = getSystemService(NotificationManager::class.java)
+        val downloader = Downloader(
+            app,
+            stopRequested = { id in stopping || app.recordings.get(id) == null },
+            onConnection = { c -> if (c == null) connections.remove(id) else connections[id] = c },
+            onProgress = { done, total ->
+                app.recordings.updateProgress(id, done, total)
+                val pct = if (total > 0) (done * 100 / total).toInt() else -1
+                runCatching { nm?.notify(DOWNLOAD_NOTIFICATION, Notifications.downloadNotification(this@RecordingService, rec.channelName, pct)) }
+            },
+        )
+        jobs[id] = scope.launch {
+            val outcome = runCatching { downloader.run(rec) }
+                .getOrElse { Downloader.Outcome.Failed("Download stopped: " + (it.message ?: it.javaClass.simpleName)) }
+            val row = app.recordings.get(id)
+            if (row == null) {
+                // Deleted while it ran: the partial file goes too (a share
+                // may have refused the delete while the file was still open).
+                runCatching { downloader.path?.let { deleteFile(app, it) } }
+            } else when (outcome) {
+                is Downloader.Outcome.Done -> {
+                    app.recordings.upsert(row.copy(status = RecordingStatus.DONE, bytesDone = outcome.bytes,
+                        bytesTotal = outcome.bytes, endUtc = System.currentTimeMillis(), error = null))
+                    runCatching { nm?.notify(id.hashCode(), Notifications.downloadDoneNotification(this@RecordingService, rec.channelName)) }
+                }
+                is Downloader.Outcome.Failed -> {
+                    app.logEvent("DOWNLOAD", "${rec.channelName}: ${outcome.reason}")
+                    app.recordings.upsert(row.copy(status = RecordingStatus.FAILED, error = outcome.reason))
+                }
+                Downloader.Outcome.Stopped ->
+                    app.recordings.upsert(row.copy(status = RecordingStatus.FAILED, error = "Stopped"))
+            }
+            synchronized(this@RecordingService) {
+                jobs.remove(id)
+                stopping.remove(id)
+                downloading = null
+            }
+            kickDownloads(app)
+        }
+    }
+
+    private fun deleteFile(app: TapperApp, path: String) {
+        if (path.startsWith("smb://", ignoreCase = true)) {
+            app.recordingLocation.shareFor(path)?.let { SmbStorage.delete(path, it) }
+        } else {
+            java.io.File(path).delete()
+        }
     }
 
     private fun startRecording(app: TapperApp, id: String) {
@@ -141,7 +230,7 @@ class RecordingService : Service() {
             // done, and only after cleanup above has actually run - stopping
             // eagerly from stopRecording() would tear down the coroutine
             // scope (onDestroy) before the file got closed.
-            if (jobs.isEmpty()) stopSelf()
+            if (jobs.isEmpty() && downloading == null) stopSelf()
         }
     }
 
@@ -177,6 +266,10 @@ class RecordingService : Service() {
         }
         localFile.parentFile?.mkdirs()
         return localFile.outputStream()
+    }
+
+    companion object {
+        private const val DOWNLOAD_NOTIFICATION = 0x7A0D
     }
 
     private fun sanitizeFileName(name: String): String =

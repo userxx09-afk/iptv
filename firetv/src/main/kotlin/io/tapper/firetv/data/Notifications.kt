@@ -64,4 +64,35 @@ object Notifications {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+
+    /** The ongoing "Downloading" notice; [percent] < 0 shows an
+     *  indeterminate bar (the server didn't give a size). */
+    fun downloadNotification(context: Context, title: String, percent: Int): Notification =
+        NotificationCompat.Builder(context, RECORDING_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("Downloading")
+            .setContentText(title)
+            .setProgress(100, percent.coerceIn(0, 100), percent < 0)
+            .setOnlyAlertOnce(true)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+    /** "Downloaded", once a title is saved; opens the app. */
+    fun downloadDoneNotification(context: Context, title: String): Notification {
+        val openApp = PendingIntent.getActivity(
+            context, title.hashCode(),
+            Intent(context, MainActivity::class.java)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(context, RECORDING_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("Downloaded")
+            .setContentText("$title is ready to watch offline, in Recordings")
+            .setContentIntent(openApp)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
 }
