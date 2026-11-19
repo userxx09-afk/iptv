@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+if [ "$1" = "remove" ] && command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then
+  systemctl disable --now tapper-alexa-relay.service >/dev/null 2>&1 || true
+fi
+exit 0

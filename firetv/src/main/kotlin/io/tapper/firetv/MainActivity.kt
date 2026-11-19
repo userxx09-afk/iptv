@@ -1071,6 +1071,22 @@ class MainActivity : ComponentActivity() {
                         "resume" -> key(android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
                         "stop" -> stopPlayback()
                         "linked" -> Toast.makeText(this@MainActivity, "Alexa is linked to this TV", Toast.LENGTH_LONG).show()
+                        // Relay 1.0 (alexa/relay) adds these. While watching live, "guide"
+                        // opens the in-player guide (the Down key); otherwise the browse
+                        // screen, which is the guide.
+                        "guide" -> if (playing != null) key(android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+                            else if (stack.size > 1) stack = stack.take(1)
+                        "recordings" -> {
+                            if (playing != null) stopPlayback()
+                            refreshRecordings()
+                            if (stack.last() !is Screen.Recordings) push(Screen.Recordings)
+                        }
+                        "home" -> {
+                            if (playing != null) stopPlayback()
+                            if (stack.size > 1) stack = stack.take(1)
+                        }
+                        // Never Back out of the app itself.
+                        "back" -> if (playing != null || stack.size > 1) key(android.view.KeyEvent.KEYCODE_BACK)
                     }
                 }
             }

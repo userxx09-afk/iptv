@@ -1,0 +1,2 @@
+# Port the relay listens on. Point your Cloudflare tunnel (or nginx/Caddy) at it.
+PORT=8787

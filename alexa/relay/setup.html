@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tapper Alexa relay · Setup</title>
+<style>
+  :root { --bg:#0b0f17; --card:#131a26; --line:#223047; --text:#e8ecf3; --dim:#93a1b8; --accent:#3aa0ff; --good:#36c486; --bad:#ff6b6b; --warn:#ffb347; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:32px 20px 80px; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  .sub { color:var(--dim); margin:0 0 28px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin:0 0 16px; }
+  section h2 { font-size:17px; margin:0 0 10px; display:flex; gap:10px; align-items:center; }
+  .n { display:inline-grid; place-items:center; width:26px; height:26px; border-radius:50%; background:var(--line); font-size:13px; flex:none; }
+  .done .n { background:var(--good); color:#06210f; }
+  p, li { color:var(--dim); } p { margin:6px 0 12px; } ol { padding-left:20px; margin:6px 0 12px; } li { margin:3px 0; }
+  b, strong { color:var(--text); }
+  label { display:block; font-size:13px; color:var(--dim); margin:10px 0 4px; }
+  input, select { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:#0d131e; color:var(--text); font:inherit; }
+  input:focus, select:focus { outline:2px solid var(--accent); border-color:transparent; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; } .row > * { flex:1; min-width:180px; }
+  button { padding:10px 16px; border-radius:8px; border:0; background:var(--accent); color:#04121f; font:inherit; font-weight:600; cursor:pointer; margin-top:12px; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  code, .mono { font-family:ui-monospace,Consolas,monospace; font-size:13px; background:#0d131e; border:1px solid var(--line); border-radius:6px; padding:2px 6px; color:var(--text); word-break:break-all; }
+  .msg { margin-top:10px; font-size:14px; } .ok { color:var(--good); } .err { color:var(--bad); } .warn { color:var(--warn); }
+  pre.log { background:#0d131e; border:1px solid var(--line); border-radius:8px; padding:10px 12px; font:12.5px/1.6 ui-monospace,Consolas,monospace; color:var(--dim); white-space:pre-wrap; max-height:240px; overflow:auto; margin:12px 0 0; }
+  table { width:100%; border-collapse:collapse; margin-top:8px; font-size:14px; } td, th { text-align:left; padding:7px 6px; border-bottom:1px solid var(--line); } th { color:var(--dim); font-weight:500; }
+  .pill { font-size:12px; padding:2px 8px; border-radius:20px; background:var(--line); color:var(--dim); } .pill.on { background:#123a28; color:var(--good); }
+  .hide { display:none !important; }
+  .copy { cursor:pointer; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tapper Alexa relay</h1>
+  <p class="sub">Voice control for Tapper IPTV and Gary's TV. <span id="ver"></span></p>
+
+  <section id="pinBox" class="hide">
+    <h2>Enter the setup PIN</h2>
+    <p>The installer showed a six-digit PIN. You can also get it on this computer with <code>tapper-alexa-relay pin</code> (Ubuntu: <code>sudo tapper-alexa-relay pin --data /var/lib/tapper-alexa-relay</code>).</p>
+    <div class="row"><div><input id="pin" inputmode="numeric" autocomplete="off" placeholder="123456"></div><div style="flex:0"><button id="pinGo">Continue</button></div></div>
+    <div id="pinMsg" class="msg"></div>
+  </section>
+
+  <div id="app" class="hide">
+    <section id="s1">
+      <h2><span class="n">1</span> Public HTTPS address</h2>
+      <p>Alexa calls this relay over HTTPS from the internet. With Cloudflare: Zero Trust › Networks › Tunnels › your tunnel › <b>Public Hostname</b> › add <b>alexa.tapper.co</b> → Service <b>HTTP</b>, URL <code class="lp">localhost:8787</code>. Then enter the address here and check it.</p>
+      <label for="publicUrl">Public address</label>
+      <div class="row"><div><input id="publicUrl" placeholder="https://alexa.tapper.co"></div><div style="flex:0;white-space:nowrap"><button id="saveUrl">Save &amp; check</button></div></div>
+      <div id="urlMsg" class="msg"></div>
+    </section>
+
+    <section id="s2">
+      <h2><span class="n">2</span> Let this relay use your Amazon account (once)</h2>
+      <p>Amazon only lets programs sign in with a "security profile" you make yourself. It takes two minutes and is free:</p>
+      <ol>
+        <li>Open <a href="https://developer.amazon.com/loginwithamazon/console/site/lwa/overview.html" target="_blank" rel="noopener" style="color:var(--accent)">Login with Amazon</a> and sign in with <b>the same Amazon account your Echos use</b>. If it asks, finish the free developer registration.</li>
+        <li>Press <b>Create a New Security Profile</b>. Name: <i>Tapper Alexa relay</i>, description: <i>Sets up my TV skill</i>, privacy URL: <code>https://tapper.co</code>. Save.</li>
+        <li>Open the profile's <b>Web Settings</b> › Edit › <b>Allowed Return URLs</b>: add <code class="copy" id="redir" title="Click to copy"></code> and save.</li>
+        <li>Copy the <b>Client ID</b> and <b>Client Secret</b> from Web Settings into the boxes below.</li>
+      </ol>
+      <div class="row">
+        <div><label for="clientId">Client ID</label><input id="clientId" autocomplete="off" placeholder="amzn1.application-oa2-client...."></div>
+        <div><label for="clientSecret">Client Secret</label><input id="clientSecret" type="password" autocomplete="off" placeholder=""></div>
+      </div>
+      <button id="saveClient">Save</button>
+      <div id="clientMsg" class="msg"></div>
+    </section>
+
+    <section id="s3">
+      <h2><span class="n">3</span> Sign in with Amazon</h2>
+      <p id="signedOut">Signs in and lets this relay create and manage your private Alexa skill. Nothing is published.</p>
+      <p id="signedIn" class="ok hide"></p>
+      <button id="signin">Sign in with Amazon</button>
+      <button id="signout" class="ghost hide">Sign out</button>
+      <div id="pasteBox" class="hide">
+        <p style="margin-top:14px">Using setup from another computer? After you sign in, Amazon sends you to a <code>localhost</code> page that won't open there. Copy that tab's whole address and paste it here:</p>
+        <div class="row"><div><input id="paste" placeholder="http://localhost:8787/setup/amazon?code=..."></div><div style="flex:0"><button id="pasteGo">Finish sign-in</button></div></div>
+      </div>
+      <div id="signMsg" class="msg"></div>
+    </section>
+
+    <section id="s4">
+      <h2><span class="n">4</span> Create the Alexa skill</h2>
+      <p>The relay makes a private skill on your account, points it here and turns it on for every Echo signed in to that account.</p>
+      <div class="row">
+        <div><label for="invocation">Invocation: "Alexa, ask <i>…</i> to play ESPN"</label><input id="invocation" placeholder="tapper"></div>
+        <div><label for="skillName">Skill name in the Alexa app</label><input id="skillName" placeholder="Tapper TV"></div>
+      </div>
+      <label for="certType">The public address's certificate</label>
+      <select id="certType">
+        <option value="Wildcard">Wildcard, like Cloudflare's *.tapper.co (most tunnels)</option>
+        <option value="Trusted">Issued for this exact name (Let's Encrypt via Caddy or nginx)</option>
+      </select>
+      <button id="create">Create the skill</button>
+      <div id="skillMsg" class="msg"></div>
+      <pre id="log" class="log hide"></pre>
+    </section>
+
+    <section id="s5">
+      <h2><span class="n">5</span> Test it</h2>
+      <p>Types a phrase into Alexa's simulator, as if you'd said it to an Echo. Before a TV is linked, Alexa should say the TV isn't linked yet: that means the whole path works.</p>
+      <div class="row"><div><input id="phrase" placeholder="open tapper"></div><div style="flex:0"><button id="test">Try it</button></div></div>
+      <div id="testMsg" class="msg"></div>
+    </section>
+
+    <section id="s6">
+      <h2><span class="n">6</span> Link your TVs</h2>
+      <p><b>Tapper IPTV</b> (on each Fire TV): Settings › Alexa › Set relay address <code class="pub"></code>, Relay key <code class="key"></code>, then <b>Link to Alexa</b>.</p>
+      <p><b>Gary's TV</b> (once, on the GarysTV computer): Settings › Alexa › relay address <code class="pub"></code> and key <code class="key"></code>. Then on each TV: Settings › Alexa › <b>Link</b>.</p>
+      <p>The TV shows a code. Say <b>"Alexa, ask <span class="inv">tapper</span> to link code 123 456"</b>. Then: "play ESPN", "channel 204", "next channel", "pause", "open the guide", "show my recordings". Several TVs can be linked to one Alexa account; Alexa controls the one that has the app open.</p>
+      <table><thead><tr><th>TV</th><th>App</th><th>Status</th><th></th></tr></thead><tbody id="tvs"><tr><td colspan="4">No TVs yet.</td></tr></tbody></table>
+      <button id="newKey" class="ghost">Make a new relay key</button>
+    </section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+
+async function api(method, path, body) {
+  const res = await fetch('/setup/api/' + path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { showPin(); throw new Error(data.error || 'Enter the setup PIN.'); }
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+function msg(id, text, cls) { const e = $(id); e.textContent = text || ''; e.className = 'msg ' + (cls || ''); }
+function showPin() { $('pinBox').classList.remove('hide'); $('app').classList.add('hide'); $('pin').focus(); }
+
+$('pinGo').onclick = async () => {
+  try {
+    const res = await fetch('/setup/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: $('pin').value }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+    $('pinBox').classList.add('hide'); load(true);
+  } catch (e) { msg('pinMsg', e.message, 'err'); }
+};
+$('pin').onkeydown = (e) => { if (e.key === 'Enter') $('pinGo').click(); };
+
+function fill(first) {
+  const s = state;
+  $('ver').textContent = 'Version ' + s.version;
+  if (first) {
+    $('publicUrl').value = s.publicUrl || '';
+    $('clientId').value = s.clientId || '';
+    $('invocation').value = s.invocation || '';
+    $('skillName').value = s.skillName || '';
+    $('certType').value = s.certType || 'Wildcard';
+    $('phrase').placeholder = 'open ' + (s.invocation || 'tapper');
+  }
+  $('clientSecret').placeholder = s.hasSecret ? '(saved, hidden)' : '';
+  $('redir').textContent = s.redirectUri;
+  document.querySelectorAll('.lp').forEach((e) => e.textContent = 'localhost:' + s.port);
+  document.querySelectorAll('.pub').forEach((e) => e.textContent = s.publicUrl || 'https://alexa.tapper.co');
+  document.querySelectorAll('.key').forEach((e) => e.textContent = s.registerKey);
+  document.querySelectorAll('.inv').forEach((e) => e.textContent = s.invocation);
+  $('s1').classList.toggle('done', !!s.publicUrl);
+  $('s2').classList.toggle('done', !!(s.clientId && s.hasSecret));
+  $('s3').classList.toggle('done', s.signedIn);
+  $('s4').classList.toggle('done', !!s.skillId && !s.job.running && (s.job.ok || !s.job.lines.length));
+  $('s6').classList.toggle('done', s.tvs.some((t) => t.linked));
+  $('signedOut').classList.toggle('hide', s.signedIn);
+  $('signedIn').classList.toggle('hide', !s.signedIn);
+  $('signedIn').textContent = 'Signed in' + (s.amazonName ? ' (developer account: ' + s.amazonName + ')' : '') + '.';
+  $('signout').classList.toggle('hide', !s.signedIn);
+  $('signin').textContent = s.signedIn ? 'Sign in again' : 'Sign in with Amazon';
+  $('pasteBox').classList.toggle('hide', s.signedIn || !s.clientId || location.hostname === 'localhost');
+  $('create').textContent = s.skillId ? 'Update the skill' : 'Create the skill';
+  $('create').disabled = s.job.running;
+  if (s.skillId && !s.job.lines.length) msg('skillMsg', 'Skill: ' + s.skillId, 'ok');
+  const log = $('log');
+  log.classList.toggle('hide', !s.job.lines.length);
+  log.textContent = s.job.lines.join('\n'); log.scrollTop = log.scrollHeight;
+  if (!s.job.running && s.job.lines.length) msg('skillMsg', s.job.ok ? 'The skill is ready.' : (s.job.error || ''), s.job.ok ? 'ok' : 'err');
+  const tb = $('tvs'); tb.innerHTML = '';
+  if (!s.tvs.length) tb.innerHTML = '<tr><td colspan="4">No TVs yet.</td></tr>';
+  s.tvs.sort((a, b) => b.created - a.created).forEach((t) => {
+    const tr = document.createElement('tr');
+    const st = t.online ? '<span class="pill on">app open</span>' : '';
+    tr.innerHTML = '<td></td><td>' + (t.app === 'garystv' ? "Gary's TV" : 'Tapper') + '</td><td>' + (t.linked ? 'Linked ' : '<span class="warn">Not linked</span> ') + st + '</td><td><button class="ghost" style="margin:0;padding:4px 10px">Remove</button></td>';
+    tr.firstChild.textContent = t.name;
+    tr.querySelector('button').onclick = async () => { if (confirm('Remove ' + t.name + '? It will have to link again.')) { await api('POST', 'tv/remove', { id: t.id }); load(); } };
+    tb.appendChild(tr);
+  });
+}
+
+async function load(first) {
+  try { state = await api('GET', 'state'); $('app').classList.remove('hide'); fill(first); } catch (_) { /* PIN box shown */ }
+}
+let timer = null;
+function poll() { clearTimeout(timer); timer = setTimeout(async () => { await load(false); poll(); }, state && state.job.running ? 1500 : 5000); }
+
+$('saveUrl').onclick = async () => {
+  msg('urlMsg', 'Checking...');
+  try {
+    await api('POST', 'config', { publicUrl: $('publicUrl').value });
+    const r = await api('POST', 'check-url', {});
+    msg('urlMsg', r.message, r.ok ? 'ok' : 'err');
+    load(false);
+  } catch (e) { msg('urlMsg', e.message, 'err'); }
+};
+$('saveClient').onclick = async () => {
+  try {
+    const b = { clientId: $('clientId').value };
+    if ($('clientSecret').value) b.clientSecret = $('clientSecret').value;
+    await api('POST', 'config', b); $('clientSecret').value = '';
+    msg('clientMsg', 'Saved.', 'ok'); load(false);
+  } catch (e) { msg('clientMsg', e.message, 'err'); }
+};
+$('redir').onclick = () => { navigator.clipboard && navigator.clipboard.writeText($('redir').textContent); msg('clientMsg', 'Return URL copied.', 'ok'); };
+$('signin').onclick = async () => {
+  try {
+    const r = await api('GET', 'amazon-url');
+    window.open(r.url, 'amazon', 'width=520,height=720');
+    msg('signMsg', location.hostname === 'localhost' ? 'Finish signing in in the Amazon window.' : 'Finish signing in, then paste the address Amazon sends you to (below).');
+    $('pasteBox').classList.toggle('hide', location.hostname === 'localhost');
+  } catch (e) { msg('signMsg', e.message, 'err'); }
+};
+$('pasteGo').onclick = async () => {
+  try { await api('POST', 'amazon-paste', { url: $('paste').value }); $('paste').value = ''; msg('signMsg', 'Signed in.', 'ok'); load(false); }
+  catch (e) { msg('signMsg', e.message, 'err'); }
+};
+$('signout').onclick = async () => { await api('POST', 'amazon-signout', {}); load(false); };
+window.addEventListener('message', (e) => { if (e.data === 'amazon-done') { msg('signMsg', '', ''); load(false); } });
+$('create').onclick = async () => {
+  try {
+    await api('POST', 'config', { invocation: $('invocation').value || 'tapper', skillName: $('skillName').value, certType: $('certType').value });
+    await api('POST', 'create', {});
+    msg('skillMsg', 'Working...'); await load(false); poll();
+  } catch (e) { msg('skillMsg', e.message, 'err'); }
+};
+$('test').onclick = async () => {
+  msg('testMsg', 'Asking Alexa...');
+  try {
+    const r = await api('POST', 'test', { phrase: $('phrase').value });
+    if (r.reply) msg('testMsg', 'You: "' + r.said + '"  Alexa: "' + r.reply + '"', r.ok ? 'ok' : 'warn');
+    else msg('testMsg', 'You: "' + r.said + '"  ' + (r.message || 'Alexa said nothing. Check step 1 and the relay log.'), 'err');
+  } catch (e) { msg('testMsg', e.message, 'err'); }
+};
+$('newKey').onclick = async () => { if (confirm('Make a new relay key? TVs already registered keep working; new ones need the new key.')) { await api('POST', 'new-key', {}); load(false); } };
+
+// The installer opens this page as /setup#pin=123456.
+const hashPin = (location.hash.match(/pin=(\d+)/) || [])[1];
+if (hashPin) { history.replaceState(null, '', location.pathname); $('pin').value = hashPin; }
+load(true).then(() => { if (!state && hashPin) $('pinGo').click(); poll(); });
+</script>
+</body>
+</html>
