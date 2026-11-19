@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+if [ "$1" = "purge" ]; then
+  rm -rf /var/lib/tapper-alexa-relay
+  deluser --system --quiet tapper-alexa >/dev/null 2>&1 || true
+fi
+if command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then systemctl daemon-reload || true; fi
+exit 0

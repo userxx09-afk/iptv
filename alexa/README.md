@@ -1,5 +1,11 @@
 # Tapper Alexa relay
 
+> **New: `relay/` (version 1.0)** replaces the Node server below for most people:
+> one program with Ubuntu (.deb) and Windows (setup .exe) installers, shared by
+> Tapper and GarysTV, that creates and enables the Alexa skill for you after you
+> sign in with Amazon. See [relay/README.md](relay/README.md). The Node server
+> below still works and speaks the same protocol.
+
 Voice control for Tapper IPTV on Fire TV: "Alexa, ask Tapper to play ESPN".
 
 Tapper itself has no server. This folder is the one optional piece that does,

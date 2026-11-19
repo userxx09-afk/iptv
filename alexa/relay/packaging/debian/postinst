@@ -1,0 +1,36 @@
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+  if ! getent passwd tapper-alexa >/dev/null; then
+    adduser --system --group --home /var/lib/tapper-alexa-relay --no-create-home --quiet tapper-alexa
+  fi
+  mkdir -p /var/lib/tapper-alexa-relay
+  chown tapper-alexa:tapper-alexa /var/lib/tapper-alexa-relay
+  chmod 700 /var/lib/tapper-alexa-relay
+  # Makes the settings file (setup PIN, relay key) before the first start.
+  PIN=$(runuser -u tapper-alexa -- /usr/bin/tapper-alexa-relay pin --data /var/lib/tapper-alexa-relay)
+  . /etc/default/tapper-alexa-relay 2>/dev/null || true
+  PORT=${PORT:-8787}
+  if command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl enable tapper-alexa-relay.service >/dev/null 2>&1 || true
+    systemctl restart tapper-alexa-relay.service || true
+  fi
+  IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+  echo ""
+  if systemctl is-active --quiet tapper-alexa-relay.service 2>/dev/null; then
+    echo "  Tapper Alexa relay is installed and running on port $PORT."
+  else
+    echo "  Tapper Alexa relay is installed, but it isn't running. Is port $PORT already in use?"
+    echo "  Change PORT in /etc/default/tapper-alexa-relay, then: sudo systemctl restart tapper-alexa-relay"
+    echo "  (journalctl -u tapper-alexa-relay shows why)"
+  fi
+  echo ""
+  echo "  Setup page:  http://${IP:-this-server}:$PORT/setup   (from this server or your home network)"
+  echo "  Setup PIN:   $PIN"
+  echo ""
+  echo "  Next: point a Cloudflare tunnel hostname (e.g. alexa.tapper.co) at http://localhost:$PORT,"
+  echo "  then open the setup page and sign in with Amazon."
+  echo ""
+fi
+exit 0

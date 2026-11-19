@@ -1,0 +1,20 @@
+[Unit]
+Description=Tapper Alexa relay (voice control for Tapper IPTV and GarysTV)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tapper-alexa
+Group=tapper-alexa
+EnvironmentFile=-/etc/default/tapper-alexa-relay
+ExecStart=/usr/bin/tapper-alexa-relay serve --data /var/lib/tapper-alexa-relay
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/tapper-alexa-relay
+
+[Install]
+WantedBy=multi-user.target

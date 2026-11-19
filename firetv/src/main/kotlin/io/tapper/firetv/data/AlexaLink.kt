@@ -40,7 +40,7 @@ class AlexaLink(context: Context) {
 
     /** Registers this TV with the relay, once. */
     suspend fun register(name: String) = withContext(Dispatchers.IO) {
-        val (status, o) = call("POST", "/tv/register", JSONObject().put("name", name), auth = false)
+        val (status, o) = call("POST", "/tv/register", JSONObject().put("name", name).put("app", "tapper"), auth = false)
         check(status == 200 && o != null) { if (status == 403) "The relay's key doesn't match." else "The relay answered HTTP $status." }
         prefs.edit().putString("tvId", o.getString("tvId")).putString("token", o.getString("token")).apply()
     }
