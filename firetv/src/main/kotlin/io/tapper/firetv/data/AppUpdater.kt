@@ -172,21 +172,24 @@ class AppUpdater(private val context: Context) {
      * this looks through recent releases for this app's tag prefix instead.
      */
     private fun fetchLatest(): Release? {
-        val conn = URL("https://api.github.com/repos/$REPO/releases?per_page=50").openConnection() as HttpURLConnection
-        try {
-            conn.connectTimeout = 10_000
-            conn.readTimeout = 15_000
-            conn.setRequestProperty("Accept", "application/vnd.github+json")
-            conn.setRequestProperty("User-Agent", "TapperIPTV-updater")
-            if (conn.responseCode != 200) return null
-            val releases = org.json.JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
-            var best: Release? = null
+        // Every page, not just the first: GitHub orders this list by the
+        // date of the commit each release's tag points at, then by tag name,
+        // and every app's releases in the prod repo share a few commits. With
+        // more than one page of other apps' releases ("lan-", "vpn-" sort
+        // ahead of "iptv-"), this app's builds landed on page two and the
+        // check reported that GitHub didn't answer.
+        var best: Release? = null
+        var answered = false
+        for (page in 1..MAX_PAGES) {
+            val releases = fetchPage(page) ?: break
+            answered = true
             for (r in 0 until releases.length()) {
                 val json = releases.getJSONObject(r)
                 if (json.optBoolean("draft") || json.optBoolean("prerelease")) continue
                 val build = json.optString("tag_name").takeIf { it.startsWith(TAG_PREFIX) }
                     ?.removePrefix(TAG_PREFIX)?.toIntOrNull() ?: continue
-                if (best != null && build <= best.build) continue
+                val current = best
+                if (current != null && build <= current.build) continue
                 val assets = json.optJSONArray("assets") ?: continue
                 for (i in 0 until assets.length()) {
                     val a = assets.getJSONObject(i)
@@ -199,7 +202,22 @@ class AppUpdater(private val context: Context) {
                     }
                 }
             }
-            return best
+            if (releases.length() < PER_PAGE) break
+        }
+        return if (answered) best else null
+    }
+
+    /** One page of the prod repo's releases; null when GitHub didn't answer. */
+    private fun fetchPage(page: Int): org.json.JSONArray? {
+        val conn = URL("https://api.github.com/repos/$REPO/releases?per_page=$PER_PAGE&page=$page")
+            .openConnection() as HttpURLConnection
+        try {
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 15_000
+            conn.setRequestProperty("Accept", "application/vnd.github+json")
+            conn.setRequestProperty("User-Agent", "TapperIPTV-updater")
+            if (conn.responseCode != 200) return null
+            return org.json.JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
         } finally {
             conn.disconnect()
         }
@@ -236,6 +254,8 @@ class AppUpdater(private val context: Context) {
         /** Public, releases-only repo; the source repo itself is private. */
         const val REPO = "userxx09-afk/prod"
         const val TAG_PREFIX = "iptv-build-"
+        const val PER_PAGE = 100
+        const val MAX_PAGES = 5
         const val CHECK_EVERY_MS = 6L * 60L * 60L * 1000L
     }
 }
