@@ -161,6 +161,7 @@ fun GarysRecordingsScreen(
     onCancel: (Recording) -> Unit,
     onDelete: (Recording) -> Unit,
     onExit: () -> Unit,
+    onRetry: (Recording) -> Unit = {},
     savedTo: String = "",
     /** Opens the record menu (Recording settings); null hides the button. */
     onSettings: (() -> Unit)? = null,
@@ -175,12 +176,7 @@ fun GarysRecordingsScreen(
     fun whenText(t: Long): String =
         java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(t) + " " +
             android.text.format.DateFormat.getTimeFormat(ctx).format(t)
-    fun status(r: Recording) = when (r.status) {
-        RecordingStatus.SCHEDULED -> "Scheduled"
-        RecordingStatus.RECORDING -> "Recording now"
-        RecordingStatus.DONE -> "Ready to play"
-        RecordingStatus.FAILED -> "Failed"
-    }
+    fun status(r: Recording) = recordingStatusText(r)
 
     CompositionLocalProvider(LocalRem provides rem) {
         Row(
@@ -189,7 +185,7 @@ fun GarysRecordingsScreen(
         ) {
             Column(Modifier.weight(1.25f).fillMaxHeight()) {
                 Row(Modifier.padding(top = rem.dp(0.2f), bottom = rem.dp(0.8f)), verticalAlignment = Alignment.CenterVertically) {
-                    Text("ALL RECORDINGS", style = gStyle(1.15f, FontWeight.SemiBold, GMuted, spacing = 0.1f))
+                    Text("RECORDINGS & DOWNLOADS", style = gStyle(1.15f, FontWeight.SemiBold, GMuted, spacing = 0.1f))
                     Spacer(Modifier.weight(1f))
                     Text("${sorted.size} recording${if (sorted.size == 1) "" else "s"}", style = gStyle(0.95f, color = GMuted))
                 }
@@ -208,7 +204,7 @@ fun GarysRecordingsScreen(
                 }
                 if (sorted.isEmpty()) {
                     Text(
-                        "No recordings yet.\nIn the Guide, hold OK on a show and choose Record.",
+                        "Nothing here yet.\nIn the Guide, hold OK on a show and choose Record.\nIn Movies or Shows, hold OK and choose Download.",
                         style = gStyle(1f, color = GMuted), modifier = Modifier.padding(top = rem.dp(1f)),
                     )
                 }
@@ -229,9 +225,11 @@ fun GarysRecordingsScreen(
                         ) {
                             when (r.status) {
                                 RecordingStatus.DONE -> onPlay(r)
-                                RecordingStatus.RECORDING -> onStop(r)
-                                RecordingStatus.SCHEDULED -> onCancel(r)
-                                RecordingStatus.FAILED -> onDelete(r)
+                                // A download is cancelled with the button on
+                                // the right, not a stray OK on the row.
+                                RecordingStatus.RECORDING -> if (!r.download) onStop(r)
+                                RecordingStatus.SCHEDULED -> if (!r.download) onCancel(r)
+                                RecordingStatus.FAILED -> if (r.download) onRetry(r) else onDelete(r)
                             }
                         }
                     }
@@ -251,26 +249,30 @@ fun GarysRecordingsScreen(
                         Text("Highlight a recording to see details.", style = gStyle(1f, color = GMuted))
                     } else {
                         Text(r.channelName, style = gStyle(1.8f, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(whenText(r.startUtc) + " – " + android.text.format.DateFormat.getTimeFormat(ctx).format(r.endUtc),
+                        Text(
+                            if (r.download) "Download  ·  asked for " + whenText(r.startUtc)
+                            else whenText(r.startUtc) + " – " + android.text.format.DateFormat.getTimeFormat(ctx).format(r.endUtc),
                             style = gStyle(1.15f, color = GSub))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(rem.dp(0.5f))) {
                             if (r.status == RecordingStatus.RECORDING) GDot()
                             Text(status(r), style = gStyle(1f, FontWeight.SemiBold,
                                 when (r.status) { RecordingStatus.FAILED -> Color(0xFFE08A7A); RecordingStatus.RECORDING -> GRed2; else -> GMuted }))
                         }
-                        Text(
-                            "Recording works best with plain stream sources (Xtream \"ts\" links and most M3U providers).",
-                            style = gStyle(0.95f, color = GDesc),
-                        )
+                        Text(recordingDetailText(r), style = gStyle(0.95f, color = GDesc))
                         Row(horizontalArrangement = Arrangement.spacedBy(rem.dp(0.7f)), modifier = Modifier.padding(top = rem.dp(0.4f))) {
                             when (r.status) {
                                 RecordingStatus.DONE -> {
                                     GBtn("▶ Play", primary = true) { onPlay(r) }
                                     GBtn("Delete") { onDelete(r) }
                                 }
-                                RecordingStatus.RECORDING -> GBtn("■ Stop recording", primary = true) { onStop(r) }
-                                RecordingStatus.SCHEDULED -> GBtn("Cancel", primary = true) { onCancel(r) }
-                                RecordingStatus.FAILED -> GBtn("Delete") { onDelete(r) }
+                                RecordingStatus.RECORDING ->
+                                    GBtn(if (r.download) "■ Cancel download" else "■ Stop recording", primary = true) { onStop(r) }
+                                RecordingStatus.SCHEDULED ->
+                                    GBtn(if (r.download) "Cancel download" else "Cancel", primary = true) { onCancel(r) }
+                                RecordingStatus.FAILED -> {
+                                    if (r.download) GBtn("↻ Try again", primary = true) { onRetry(r) }
+                                    GBtn("Delete") { onDelete(r) }
+                                }
                             }
                         }
                     }

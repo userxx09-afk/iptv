@@ -177,6 +177,16 @@ class MainActivity : ComponentActivity() {
         // screensaver while the app sat open, and kept the TV pulling a
         // picture, and the processor busy, for as long as the app was left.
 
+        // Downloads that were cut off (the app was closed, the Fire TV
+        // restarted, an update installed) carry on from where they were.
+        if (app.recordings.pendingDownloads().isNotEmpty()) {
+            runCatching {
+                ContextCompat.startForegroundService(
+                    this, Intent(this, RecordingService::class.java).setAction(RecordingAlarmReceiver.ACTION_DOWNLOAD),
+                )
+            }
+        }
+
         setContent {
             // A real stack, so Back always goes up one level from any screen
             // rather than each screen inventing its own idea of "back".
@@ -352,12 +362,76 @@ class MainActivity : ComponentActivity() {
 
             fun refreshReminders() { reminderIds = app.reminders.all().map { it.id }.toSet() }
             fun refreshRecordings() { recordingsList = app.recordings.all() }
+            // Download progress is written by RecordingService; while the
+            // Recordings screen is open, re-read it so the percentage moves.
+            LaunchedEffect(screen) {
+                if (screen is Screen.Recordings) {
+                    while (true) {
+                        kotlinx.coroutines.delay(2_000)
+                        refreshRecordings()
+                    }
+                }
+            }
 
             // Resolves a channel to a stream URL suitable for recording. Only
             // LIVE channels are supported: MOVIE/SERIES items are on-demand
             // already and recording them would just be a slower re-download.
             fun recordableUrl(ch: Channel): String? =
                 if (ch.kind == ContentKind.LIVE) ch.primaryUrl else null
+
+            // Download for offline viewing: a movie, an episode, or a
+            // programme from a channel's catch-up archive (passed in already
+            // resolved to its archive URL). It goes in the same list and the
+            // same place as recordings; RecordingService fetches the queue
+            // one title at a time.
+            fun startDownload(ch: Channel, title: String = ch.name) {
+                val stream = ch.streams.firstOrNull()
+                if (stream == null) {
+                    Toast.makeText(this@MainActivity, "$title has no stream to download", Toast.LENGTH_LONG).show()
+                    return
+                }
+                if (io.tapper.firetv.recordings.Downloader.looksLikeHls(stream.url)) {
+                    Toast.makeText(this@MainActivity, io.tapper.firetv.recordings.Downloader.HLS_REASON, Toast.LENGTH_LONG).show()
+                    return
+                }
+                app.recordings.existingDownload(stream.url)?.let { already ->
+                    val where = if (already.status == io.tapper.firetv.data.RecordingStatus.DONE) "already downloaded" else "already downloading"
+                    Toast.makeText(this@MainActivity, "$title is $where. It's in Recordings.", Toast.LENGTH_LONG).show()
+                    return
+                }
+                val now = System.currentTimeMillis()
+                app.recordings.upsert(
+                    Recording(
+                        id = Recording.newId(), sourceId = ch.sourceId, channelId = ch.id,
+                        channelName = title, streamUrl = stream.url,
+                        startUtc = now, endUtc = now,
+                        download = true, headers = stream.headers,
+                    )
+                )
+                refreshRecordings()
+                ContextCompat.startForegroundService(
+                    this@MainActivity,
+                    Intent(this@MainActivity, RecordingService::class.java)
+                        .setAction(RecordingAlarmReceiver.ACTION_DOWNLOAD),
+                )
+                val where = app.recordingLocation.activeShare()?.label ?: "this Fire TV"
+                Toast.makeText(this@MainActivity, "Downloading $title to $where. Find it in Recordings.", Toast.LENGTH_LONG).show()
+            }
+
+            fun downloadEpisode(ep: Channel) {
+                val show = seriesContext?.name
+                startDownload(ep, if (show != null && !ep.name.contains(show, ignoreCase = true)) "$show - ${ep.name}" else ep.name)
+            }
+
+            fun downloadCatchUp(ch: Channel, p: EpgDatabase.Programme) {
+                val archived = CatchupUrl.archiveChannel(ch, p.title, p.startUtc, p.endUtc, System.currentTimeMillis())
+                if (archived == null) {
+                    Toast.makeText(this@MainActivity, "That programme is no longer in ${ch.name}'s archive", Toast.LENGTH_LONG).show()
+                } else {
+                    val day = java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(p.startUtc))
+                    startDownload(archived, "${p.title} (${ch.name}, $day)")
+                }
+            }
 
             fun runSync() {
                 syncBusy = true
@@ -1118,18 +1192,18 @@ class MainActivity : ComponentActivity() {
                         Screen.Search -> "Search"
                         Screen.AddSource -> "Add a source"
                         Screen.Settings -> "Settings"
-                        Screen.Recordings -> "My Recordings"
+                        Screen.Recordings -> "Recordings & Downloads"
                         Screen.Teams -> "My Teams"
                         is Screen.Failed -> "Problem"
                         else -> ""
                     },
                     hints = when (current) {
                         Screen.Search -> listOf("Type" to "Search", "↓" to "Results", "OK" to "Open", "Hold OK" to "Options", "Back" to "Back")
-                        Screen.Recordings -> listOf("↑↓" to "Move", "OK" to "Play / stop", "Back" to "Back")
+                        Screen.Recordings -> listOf("↑↓" to "Move", "OK" to "Play / stop / retry", "Back" to "Back")
                         is Screen.Series -> listOf("↑↓" to "Move", "OK" to "Play", "Back" to "Back")
                         else -> listOf("↑↓←→" to "Move", "OK" to "Select", "Back" to "Back")
                     },
-                    recording = recordingsList.any { it.status == io.tapper.firetv.data.RecordingStatus.RECORDING },
+                    recording = recordingsList.any { !it.download && it.status == io.tapper.firetv.data.RecordingStatus.RECORDING },
                     onBack = { pop() },
                     onHome = { backToBrowse(io.tapper.firetv.ui.GView.HOME) },
                     onGuide = { backToBrowse(io.tapper.firetv.ui.GView.GUIDE) },
@@ -1160,6 +1234,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onPlay = { list, i -> startPlayback(Playing(list, i)) },
                         onExit = { pop() },
+                        onDownload = { ep -> downloadEpisode(ep) },
                     )
 
                     current is Screen.EpgPick -> EpgPickerScreen(
@@ -1207,6 +1282,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onSetGuideChannel = { push(Screen.EpgPick(it)) },
                         onExit = { pop() },
+                        onDownload = { ch -> startDownload(ch) },
                     )
 
                     current is Screen.AddSource -> AddSourceScreen(
@@ -1539,6 +1615,8 @@ class MainActivity : ComponentActivity() {
                         canCatchUp = { ch, p ->
                             CatchupUrl.canPlay(ch, p.startUtc, System.currentTimeMillis())
                         },
+                        onDownload = { ch -> startDownload(ch) },
+                        onDownloadCatchUp = { ch, p -> downloadCatchUp(ch, p) },
                         onCatchUp = { ch, p ->
                             val archived = CatchupUrl.archiveChannel(
                                 ch, p.title, p.startUtc, p.endUtc, System.currentTimeMillis(),
@@ -1751,7 +1829,22 @@ class MainActivity : ComponentActivity() {
                                     .putExtra("recording_id", r.id)
                                     .setAction(RecordingAlarmReceiver.ACTION_STOP)
                             )
+                            // Stopping a download is cancelling it: the row
+                            // and its partial file go (the service removes
+                            // the file once the connection has closed).
+                            if (r.download) app.recordings.remove(r.id)
                             refreshRecordings()
+                        },
+                        onRetry = { r ->
+                            app.recordings.get(r.id)?.let {
+                                app.recordings.upsert(it.copy(status = io.tapper.firetv.data.RecordingStatus.SCHEDULED, error = null))
+                            }
+                            refreshRecordings()
+                            ContextCompat.startForegroundService(
+                                this@MainActivity,
+                                Intent(this@MainActivity, RecordingService::class.java)
+                                    .setAction(RecordingAlarmReceiver.ACTION_DOWNLOAD),
+                            )
                         },
                         onCancel = { r -> app.recordings.remove(r.id); refreshRecordings() },
                         onDelete = { r -> app.recordings.remove(r.id); refreshRecordings() },

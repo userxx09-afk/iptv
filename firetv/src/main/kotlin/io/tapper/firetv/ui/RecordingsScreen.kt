@@ -51,6 +51,8 @@ fun RecordingsScreen(
     onCancel: (Recording) -> Unit,
     onDelete: (Recording) -> Unit,
     onExit: () -> Unit,
+    /** Puts a failed download back in the queue. */
+    onRetry: (Recording) -> Unit = {},
     /** Where new recordings go: a network share's name or "this Fire TV".
      *  Re-read whenever the record menu closes. */
     savedTo: () -> String = { "" },
@@ -65,6 +67,7 @@ fun RecordingsScreen(
     if (io.tapper.firetv.ui.theme.isGarysSkin) {
         GarysRecordingsScreen(
             recordings, onPlay, onStop, onCancel, onDelete, onExit,
+            onRetry = onRetry,
             savedTo = savedText,
             onSettings = if (settingsPanel != null) ({ showSettings = true }) else null,
         )
@@ -79,12 +82,13 @@ fun RecordingsScreen(
         Modifier.fillMaxSize().skinBackground()
             .padding(horizontal = 48.dp, vertical = 32.dp)
     ) {
-        Text("Recordings", style = MaterialTheme.typography.headlineLarge, color = Ink)
+        Text("Recordings & downloads", style = MaterialTheme.typography.headlineLarge, color = Ink)
         Spacer(Modifier.height(6.dp))
         Text(
             "Recording works cleanly for plain stream sources (Xtream \"ts\" links, " +
                 "most M3U providers). A source that serves fragmented or encrypted " +
-                "HLS may still produce a file that doesn't play back.",
+                "HLS may still produce a file that doesn't play back. Downloaded movies " +
+                "and episodes are saved in the same place and play without the internet.",
             style = MaterialTheme.typography.bodyMedium, color = Dim,
         )
         if (settingsPanel != null) {
@@ -101,8 +105,8 @@ fun RecordingsScreen(
 
         if (sorted.isEmpty()) {
             Text(
-                "Nothing scheduled yet. Long-press a channel or a guide entry " +
-                    "and choose Record to add one.",
+                "Nothing here yet. Long-press a channel or a guide entry and choose " +
+                    "Record, or long-press a movie or episode and choose Download.",
                 style = MaterialTheme.typography.bodyLarge, color = Dim,
             )
         } else {
@@ -120,9 +124,21 @@ fun RecordingsScreen(
     menuFor?.let { r ->
         ItemMenu(
             title = r.channelName,
-            subtitle = fmt.format(Date(r.startUtc)) + "  ·  " + statusLabel(r.status),
+            subtitle = fmt.format(Date(r.startUtc)) + "  ·  " + recordingStatusText(r) +
+                (if (r.download && r.status == RecordingStatus.FAILED) "\n" + recordingDetailText(r) else ""),
             actions = buildList {
-                when (r.status) {
+                if (r.download) when (r.status) {
+                    RecordingStatus.DONE -> {
+                        add(MenuAction("Play") { onPlay(r) })
+                        add(MenuAction("Delete") { onDelete(r) })
+                    }
+                    RecordingStatus.RECORDING -> add(MenuAction("Cancel download") { onStop(r) })
+                    RecordingStatus.SCHEDULED -> add(MenuAction("Cancel download") { onCancel(r) })
+                    RecordingStatus.FAILED -> {
+                        add(MenuAction("Try again") { onRetry(r) })
+                        add(MenuAction("Delete") { onDelete(r) })
+                    }
+                } else when (r.status) {
                     RecordingStatus.DONE -> {
                         add(MenuAction("Play") { onPlay(r) })
                         add(MenuAction("Delete") { onDelete(r) })
@@ -141,13 +157,6 @@ fun RecordingsScreen(
             onDismiss = { menuFor = null },
         )
     }
-}
-
-private fun statusLabel(status: RecordingStatus): String = when (status) {
-    RecordingStatus.SCHEDULED -> "Scheduled"
-    RecordingStatus.RECORDING -> "Recording now"
-    RecordingStatus.DONE -> "Ready to play"
-    RecordingStatus.FAILED -> "Failed"
 }
 
 @Composable
@@ -170,7 +179,7 @@ private fun RecordingRow(
         Text(recording.channelName, style = MaterialTheme.typography.titleMedium, color = Ink,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
-            fmt.format(Date(recording.startUtc)) + "  ·  " + statusLabel(recording.status),
+            fmt.format(Date(recording.startUtc)) + "  ·  " + recordingStatusText(recording),
             style = MaterialTheme.typography.bodyMedium,
             color = when (recording.status) {
                 RecordingStatus.RECORDING -> Focus

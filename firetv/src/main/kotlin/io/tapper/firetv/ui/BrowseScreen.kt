@@ -242,6 +242,10 @@ fun BrowseScreen(
      *  archive, and playing it. Only channels with an archive say yes. */
     canCatchUp: (Channel, Programme) -> Boolean = { _, _ -> false },
     onCatchUp: (Channel, Programme) -> Unit = { _, _ -> },
+    /** Download for offline viewing: a movie (or episode), and a programme
+     *  that already aired on a channel with an archive. */
+    onDownload: (Channel) -> Unit = {},
+    onDownloadCatchUp: (Channel, Programme) -> Unit = { _, _ -> },
     /** Ad-hoc "record now" for a channel with no specific guide entry chosen. */
     onRecordChannel: (Channel) -> Unit,
     onOpenRecordings: () -> Unit,
@@ -341,6 +345,9 @@ fun BrowseScreen(
             onOpenTeams = onOpenTeams,
             onRecord = onRecord,
             onRecordChannel = onRecordChannel,
+            onDownload = onDownload,
+            canCatchUp = canCatchUp,
+            onDownloadCatchUp = onDownloadCatchUp,
             hasReminder = hasReminder,
             onSetReminder = onSetReminder,
             onCancelReminder = onCancelReminder,
@@ -1182,6 +1189,11 @@ fun BrowseScreen(
                                     MenuAction(
                                         if (ch.kind == ContentKind.SERIES) "Open" else "Play"
                                     ) { activate() },
+                                ) + (if (ch.kind == ContentKind.MOVIE) listOf(
+                                    // The alternative to watching now: save
+                                    // it to watch later without the internet.
+                                    MenuAction("Download") { onDownload(ch) },
+                                ) else emptyList()) + listOf(
                                     MenuAction(
                                         if (isFav) "Remove from My List" else "Add to My List"
                                     ) { favorites.toggle(ch.sourceId, ch.id); revision++ },
@@ -1651,6 +1663,7 @@ fun BrowseScreen(
                     onRecord = { p -> focusedChannel?.let { onRecord(it, p) } },
                     canCatchUp = { p -> focusedChannel?.let { canCatchUp(it, p) } ?: false },
                     onCatchUp = { p -> focusedChannel?.let { onCatchUp(it, p) } },
+                    onDownloadCatchUp = { p -> focusedChannel?.let { onDownloadCatchUp(it, p) } },
                     isSeriesRecorded = { p -> focusedChannel?.let { isSeriesRecorded(it, p) } ?: false },
                     onToggleSeries = onToggleSeries?.let { f -> { p: Programme -> focusedChannel?.let { f(it, p) } } },
                     modifier = guideModifier,

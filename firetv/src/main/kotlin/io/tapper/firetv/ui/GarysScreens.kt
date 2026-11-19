@@ -164,6 +164,9 @@ fun GarysBrowseScreen(
     onOpenTeams: () -> Unit = {},
     onRecord: (Channel, Programme) -> Unit,
     onRecordChannel: (Channel) -> Unit,
+    onDownload: (Channel) -> Unit = {},
+    canCatchUp: (Channel, Programme) -> Boolean = { _, _ -> false },
+    onDownloadCatchUp: (Channel, Programme) -> Unit = { _, _ -> },
     hasReminder: (Channel, Programme) -> Boolean,
     onSetReminder: (Channel, Programme) -> Unit,
     onCancelReminder: (Channel, Programme) -> Unit,
@@ -207,7 +210,7 @@ fun GarysBrowseScreen(
                     GView.MOVIES -> "Movies"
                     GView.SHOWS -> "Shows"
                 },
-                recording = recordings.any { it.status == RecordingStatus.RECORDING },
+                recording = recordings.any { !it.download && it.status == RecordingStatus.RECORDING },
                 now = now,
                 onBack = { view = GView.HOME },
                 onHome = { view = GView.HOME },
@@ -250,6 +253,11 @@ fun GarysBrowseScreen(
                                     else MenuAction("Remind me when it starts") { onSetReminder(ch, p) }
                                 }
                             } else {
+                                if (p != null && canCatchUp(ch, p)) {
+                                    // Already aired, from the channel's
+                                    // archive: save it to watch offline.
+                                    acts += MenuAction("⬇  Download ${p.title}") { onDownloadCatchUp(ch, p) }
+                                }
                                 acts += MenuAction("●  Record this channel now") { onRecordChannel(ch) }
                             }
                             acts += if (isFav(ch)) MenuAction("☆  Remove from Favorites") { toggleFavorite(ch) }
@@ -268,6 +276,13 @@ fun GarysBrowseScreen(
                             ?: epgStatus?.takeIf { it.startsWith("Loading") }
                             ?: "This source has no ${if (view == GView.MOVIES) "movies" else "shows"}.",
                         onPlay = onPlay, onOpenSeries = onOpenSeries,
+                        onOptions = { items, i ->
+                            val c = items[i]
+                            menu = c.name to listOf(
+                                MenuAction("▶  Watch") { onPlay(items, i) },
+                                MenuAction("⬇  Download") { onDownload(c) },
+                            )
+                        },
                     )
                 }
             }
@@ -275,6 +290,7 @@ fun GarysBrowseScreen(
                 when (view) {
                     GView.HOME -> listOf("←→↑↓" to "Move", "OK" to "Select", "≡" to "Options")
                     GView.GUIDE -> listOf("↑↓←→" to "Move", "OK" to "Watch", "Hold OK" to "Record · Favorite", "Back" to "Home")
+                    GView.MOVIES -> listOf("↑↓" to "Move", "OK" to "Play", "Hold OK" to "Download", "Back" to "Home")
                     else -> listOf("↑↓" to "Move", "OK" to "Play", "Back" to "Home")
                 }
             )
@@ -521,7 +537,7 @@ private fun GHome(
                     GCard(ch.name, nowPlaying[epgIdFor(ch)]?.title ?: (ch.group ?: "Live"), star = true) { onPlay(favorites, i) }
                 }
             }
-            val upcoming = recordings.filter { it.status == RecordingStatus.RECORDING || it.status == RecordingStatus.SCHEDULED }
+            val upcoming = recordings.filter { !it.download && (it.status == RecordingStatus.RECORDING || it.status == RecordingStatus.SCHEDULED) }
                 .sortedBy { it.startUtc }.take(6)
             GStrip("Recording now & up next") {
                 if (upcoming.isEmpty()) item { GEmpty("Nothing scheduled. Open the Guide and hold OK on a show to record it.") }
@@ -535,7 +551,7 @@ private fun GHome(
                 }
             }
             val recent = recordings.filter { it.status == RecordingStatus.DONE }.sortedByDescending { it.startUtc }.take(6)
-            GStrip("Recently recorded") {
+            GStrip("Recently recorded & downloaded") {
                 if (recent.isEmpty()) item { GEmpty("Your recordings will show up here.") }
                 items(recent) { rec -> GCard(rec.channelName, whenText(rec.startUtc), onClick = onOpenRecordings) }
             }
@@ -1013,6 +1029,8 @@ private fun GLibrary(
     emptyText: String,
     onPlay: (List<Channel>, Int) -> Unit,
     onOpenSeries: (Channel) -> Unit,
+    /** Hold OK on a movie: Watch or Download. */
+    onOptions: (List<Channel>, Int) -> Unit = { _, _ -> },
 ) {
     val r = LocalRem.current
     val groups = remember(section) { section?.byCategory.orEmpty().filter { it.channels.isNotEmpty() } }
@@ -1048,7 +1066,10 @@ private fun GLibrary(
                 modifier = Modifier.weight(1f).holdLeftToTop(listState, first),
             ) {
                 itemsIndexed(items, key = { _, c -> c.id }) { i, c ->
-                    GItemRow(c, Modifier.let { if (i == 0) it.focusRequester(first) else it }, onFocus = { sel = i }) { open(i) }
+                    GItemRow(
+                        c, Modifier.let { if (i == 0) it.focusRequester(first) else it }, onFocus = { sel = i },
+                        onHold = if (kind == ContentKind.MOVIE) ({ onOptions(items, i) }) else null,
+                    ) { open(i) }
                 }
             }
         }
@@ -1071,7 +1092,8 @@ private fun GLibrary(
                 Text(c.name, style = gStyle(1.8f, FontWeight.Bold), maxLines = 3, overflow = TextOverflow.Ellipsis)
                 c.group?.let { Text(it, style = gStyle(1.15f, color = GSub), maxLines = 1) }
                 Text(
-                    if (kind == ContentKind.SERIES) "Press OK to see the seasons and episodes." else "Press OK to play.",
+                    if (kind == ContentKind.SERIES) "Press OK to see the seasons and episodes. Hold OK on an episode to download it."
+                    else "Press OK to play. Hold OK to download it for offline viewing.",
                     style = gStyle(1f, color = GMuted),
                 )
             }
@@ -1080,7 +1102,7 @@ private fun GLibrary(
 }
 
 @Composable
-private fun GItemRow(c: Channel, modifier: Modifier, onFocus: () -> Unit, onClick: () -> Unit) {
+private fun GItemRow(c: Channel, modifier: Modifier, onFocus: () -> Unit, onHold: (() -> Unit)? = null, onClick: () -> Unit) {
     val r = LocalRem.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -1089,7 +1111,10 @@ private fun GItemRow(c: Channel, modifier: Modifier, onFocus: () -> Unit, onClic
     Row(
         modifier.fillMaxWidth().clip(shape).background(if (focused) GFocusBg else GPanel)
             .drawBehind { if (focused) drawRect(GRed2, size = androidx.compose.ui.geometry.Size(5.dp.toPx(), size.height)) }
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .let {
+                if (onHold != null) it.okOrHold(interaction, onClick, onHold)
+                else it.clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            }
             .padding(horizontal = r.dp(1f), vertical = r.dp(0.75f)),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(r.dp(0.9f)),

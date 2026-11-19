@@ -58,8 +58,23 @@ fun EpisodesScreen(
     nextUpId: String?,
     onPlay: (List<Channel>, Int) -> Unit,
     onExit: () -> Unit,
+    /** Hold OK on an episode: Play or Download. */
+    onDownload: ((Channel) -> Unit)? = null,
 ) {
     BackHandler { onExit() }
+    var menuFor by remember { mutableStateOf<Pair<List<Channel>, Int>?>(null) }
+    menuFor?.let { (list, i) ->
+        val ep = list[i]
+        ItemMenu(
+            title = ep.name,
+            subtitle = series.name,
+            actions = listOfNotNull(
+                MenuAction("Play") { onPlay(list, i) },
+                onDownload?.let { d -> MenuAction("Download") { d(ep) } },
+            ),
+            onDismiss = { menuFor = null },
+        )
+    }
 
     // Season derived from the group each episode was tagged with on fetch.
     val seasons = remember(episodes) { episodes.mapNotNull { it.group }.distinct() }
@@ -113,6 +128,8 @@ fun EpisodesScreen(
                     when {
                         loading -> "Loading episodes..."
                         error != null -> error
+                        onDownload != null && episodes.isNotEmpty() ->
+                            "${episodes.size} episodes  ·  hold OK on one to download it"
                         else -> "${episodes.size} episodes"
                     },
                     style = MaterialTheme.typography.bodyMedium,
@@ -155,6 +172,7 @@ fun EpisodesScreen(
                     watched = ep.id in watchedIds,
                     nextUp = ep.id == nextUpId,
                     modifier = if (i == 0) Modifier.focusRequester(topFocus) else Modifier,
+                    onHold = if (onDownload != null) ({ menuFor = shown to i }) else null,
                 ) { onPlay(shown, i) }
             }
         }
@@ -167,6 +185,7 @@ private fun EpisodeRow(
     watched: Boolean,
     nextUp: Boolean,
     modifier: Modifier = Modifier,
+    onHold: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -177,7 +196,10 @@ private fun EpisodeRow(
             .background(if (focused) Focus.copy(alpha = 0.18f) else panelTint(0.04f)).skinFocusBar(focused)
             .border(if (focused) 2.dp else 0.dp, if (focused) Focus else Color.Transparent,
                 RoundedCornerShape(8.dp))
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .let {
+                if (onHold != null) it.okOrHold(interaction, onClick, onHold)
+                else it.clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
