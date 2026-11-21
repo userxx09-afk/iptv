@@ -162,6 +162,8 @@ fun GarysRecordingsScreen(
     onDelete: (Recording) -> Unit,
     onExit: () -> Unit,
     onRetry: (Recording) -> Unit = {},
+    onPause: (Recording) -> Unit = {},
+    onResume: (Recording) -> Unit = {},
     savedTo: String = "",
     /** Opens the record menu (Recording settings); null hides the button. */
     onSettings: (() -> Unit)? = null,
@@ -228,7 +230,7 @@ fun GarysRecordingsScreen(
                                 // A download is cancelled with the button on
                                 // the right, not a stray OK on the row.
                                 RecordingStatus.RECORDING -> if (!r.download) onStop(r)
-                                RecordingStatus.SCHEDULED -> if (!r.download) onCancel(r)
+                                RecordingStatus.SCHEDULED -> if (!r.download) onCancel(r) else if (r.paused) onResume(r)
                                 RecordingStatus.FAILED -> if (r.download) onRetry(r) else onDelete(r)
                             }
                         }
@@ -265,10 +267,19 @@ fun GarysRecordingsScreen(
                                     GBtn("▶ Play", primary = true) { onPlay(r) }
                                     GBtn("Delete") { onDelete(r) }
                                 }
-                                RecordingStatus.RECORDING ->
-                                    GBtn(if (r.download) "■ Cancel download" else "■ Stop recording", primary = true) { onStop(r) }
-                                RecordingStatus.SCHEDULED ->
-                                    GBtn(if (r.download) "Cancel download" else "Cancel", primary = true) { onCancel(r) }
+                                RecordingStatus.RECORDING -> if (r.download) {
+                                    GBtn("❚❚ Pause", primary = true) { onPause(r) }
+                                    GBtn("■ Cancel download") { onStop(r) }
+                                } else {
+                                    GBtn("■ Stop recording", primary = true) { onStop(r) }
+                                }
+                                RecordingStatus.SCHEDULED -> if (r.download) {
+                                    if (r.paused) GBtn("▶ Resume", primary = true) { onResume(r) }
+                                    else GBtn("❚❚ Pause", primary = true) { onPause(r) }
+                                    GBtn("■ Cancel download") { onCancel(r) }
+                                } else {
+                                    GBtn("Cancel", primary = true) { onCancel(r) }
+                                }
                                 RecordingStatus.FAILED -> {
                                     if (r.download) GBtn("↻ Try again", primary = true) { onRetry(r) }
                                     GBtn("Delete") { onDelete(r) }
