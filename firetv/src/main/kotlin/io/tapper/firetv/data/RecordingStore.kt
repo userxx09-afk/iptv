@@ -36,6 +36,9 @@ data class Recording(
     val headers: Map<String, String> = emptyMap(),
     /** Why it failed, in plain English, when it did. */
     val error: String? = null,
+    /** A download the viewer paused: it stays SCHEDULED, keeps what it has
+     *  fetched so far, and is skipped by the queue until resumed. */
+    val paused: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("sourceId", sourceId).put("channelId", channelId)
@@ -45,6 +48,7 @@ data class Recording(
         .put("download", download).put("bytesDone", bytesDone).put("bytesTotal", bytesTotal)
         .put("headers", JSONObject().apply { headers.forEach { (k, v) -> put(k, v) } })
         .put("error", error ?: JSONObject.NULL)
+        .put("paused", paused)
 
     companion object {
         fun fromJson(o: JSONObject) = Recording(
@@ -62,6 +66,7 @@ data class Recording(
                 h.keys().asSequence().associateWith { k -> h.optString(k) }
             }.orEmpty(),
             error = o.optString("error").takeIf { it.isNotBlank() && it != "null" },
+            paused = o.optBoolean("paused", false),
         )
 
         fun newId(): String = "rec-" + UUID.randomUUID().toString().take(8)
@@ -151,7 +156,7 @@ class RecordingStore(private val context: Context) {
 
     /** Downloads waiting their turn, oldest first. */
     fun pendingDownloads(): List<Recording> =
-        all().filter { it.download && it.status == RecordingStatus.SCHEDULED }.sortedBy { it.startUtc }
+        all().filter { it.download && !it.paused && it.status == RecordingStatus.SCHEDULED }.sortedBy { it.startUtc }
 
     /** An earlier download of the same stream that hasn't failed, if any:
      *  asking twice shouldn't fetch the same film twice. */

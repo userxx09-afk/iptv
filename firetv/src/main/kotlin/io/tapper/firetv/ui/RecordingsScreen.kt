@@ -53,6 +53,9 @@ fun RecordingsScreen(
     onExit: () -> Unit,
     /** Puts a failed download back in the queue. */
     onRetry: (Recording) -> Unit = {},
+    /** Pause a download (keeps what it has) and pick it up again. */
+    onPause: (Recording) -> Unit = {},
+    onResume: (Recording) -> Unit = {},
     /** Where new recordings go: a network share's name or "this Fire TV".
      *  Re-read whenever the record menu closes. */
     savedTo: () -> String = { "" },
@@ -68,6 +71,8 @@ fun RecordingsScreen(
         GarysRecordingsScreen(
             recordings, onPlay, onStop, onCancel, onDelete, onExit,
             onRetry = onRetry,
+            onPause = onPause,
+            onResume = onResume,
             savedTo = savedText,
             onSettings = if (settingsPanel != null) ({ showSettings = true }) else null,
         )
@@ -132,8 +137,17 @@ fun RecordingsScreen(
                         add(MenuAction("Play") { onPlay(r) })
                         add(MenuAction("Delete") { onDelete(r) })
                     }
-                    RecordingStatus.RECORDING -> add(MenuAction("Cancel download") { onStop(r) })
-                    RecordingStatus.SCHEDULED -> add(MenuAction("Cancel download") { onCancel(r) })
+                    RecordingStatus.RECORDING -> {
+                        add(MenuAction("Pause download") { onPause(r) })
+                        add(MenuAction("Cancel download") { onStop(r) })
+                    }
+                    RecordingStatus.SCHEDULED -> {
+                        add(
+                            if (r.paused) MenuAction("Resume download") { onResume(r) }
+                            else MenuAction("Pause download") { onPause(r) }
+                        )
+                        add(MenuAction("Cancel download") { onCancel(r) })
+                    }
                     RecordingStatus.FAILED -> {
                         add(MenuAction("Try again") { onRetry(r) })
                         add(MenuAction("Delete") { onDelete(r) })

@@ -1835,6 +1835,30 @@ class MainActivity : ComponentActivity() {
                             if (r.download) app.recordings.remove(r.id)
                             refreshRecordings()
                         },
+                        onPause = { r ->
+                            app.recordings.get(r.id)?.let { app.recordings.upsert(it.copy(paused = true)) }
+                            // A running download is stopped; the service sees
+                            // the paused flag and keeps the row and file.
+                            if (r.status == io.tapper.firetv.data.RecordingStatus.RECORDING) {
+                                startService(
+                                    Intent(this@MainActivity, RecordingService::class.java)
+                                        .putExtra("recording_id", r.id)
+                                        .setAction(RecordingAlarmReceiver.ACTION_STOP)
+                                )
+                            }
+                            refreshRecordings()
+                        },
+                        onResume = { r ->
+                            app.recordings.get(r.id)?.let {
+                                app.recordings.upsert(it.copy(paused = false, status = io.tapper.firetv.data.RecordingStatus.SCHEDULED, error = null))
+                            }
+                            refreshRecordings()
+                            ContextCompat.startForegroundService(
+                                this@MainActivity,
+                                Intent(this@MainActivity, RecordingService::class.java)
+                                    .setAction(RecordingAlarmReceiver.ACTION_DOWNLOAD),
+                            )
+                        },
                         onRetry = { r ->
                             app.recordings.get(r.id)?.let {
                                 app.recordings.upsert(it.copy(status = io.tapper.firetv.data.RecordingStatus.SCHEDULED, error = null))

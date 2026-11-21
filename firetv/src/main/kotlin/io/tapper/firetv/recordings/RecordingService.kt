@@ -127,8 +127,11 @@ class RecordingService : Service() {
                     app.logEvent("DOWNLOAD", "${rec.channelName}: ${outcome.reason}")
                     app.recordings.upsert(row.copy(status = RecordingStatus.FAILED, error = outcome.reason))
                 }
+                // Paused: back in the list as waiting, with what it has so
+                // far; Resume picks up from there.
                 Downloader.Outcome.Stopped ->
-                    app.recordings.upsert(row.copy(status = RecordingStatus.FAILED, error = "Stopped"))
+                    if (row.paused) app.recordings.upsert(row.copy(status = RecordingStatus.SCHEDULED, error = null))
+                    else app.recordings.upsert(row.copy(status = RecordingStatus.FAILED, error = "Stopped"))
             }
             synchronized(this@RecordingService) {
                 jobs.remove(id)
